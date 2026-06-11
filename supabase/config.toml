@@ -1,0 +1,10 @@
+# Supabase CLI config. Run `supabase link --project-ref <ref>` then
+# `supabase db push` to apply ./migrations to your hosted project.
+# `supabase functions deploy purge` to ship the purge Edge Function.
+project_id = "mathvision-materials"
+
+[db]
+major_version = 15
+
+[functions.purge]
+verify_jwt = false

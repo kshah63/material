@@ -1,0 +1,345 @@
+@import "tailwindcss";
+
+/* =============================================================================
+   MathVision Materials Portal — warm / approachable design system
+   Grounded in a math study room: warm paper, honey folders, and a butter
+   highlighter that means one thing only — "teacher-only".
+   ========================================================================== */
+
+:root {
+  /* warm neutrals */
+  --paper: #fbf5ec;
+  --paper-2: #f6ecdd;
+  --surface: #fffdfa;
+  --sunk: #f1e6d4;
+  --ink: #33271b;
+  --ink-soft: #8a7866;
+  --ink-faint: #b6a795;
+  --line: #ece0cd;
+  --line-strong: #ddcdb4;
+
+  /* warm accents */
+  --berry: #e85c6a; /* primary action — strawberry */
+  --berry-deep: #cf4659;
+  --berry-wash: #fdeceedd;
+  --honey: #f2b14e; /* folders */
+  --honey-deep: #d99327;
+  --marker: #ffd766; /* teacher-only highlighter — used for nothing else */
+  --marker-ink: #6a4e0e;
+  --leaf: #3aa279; /* success / restore */
+  --leaf-wash: #e6f4ec;
+  --grape: #6e62b6; /* rare structural accent */
+
+  --radius: 14px;
+  --radius-sm: 9px;
+  --radius-lg: 22px;
+  --shadow-card: 0 1px 0 #ffffff inset, 0 6px 22px -14px rgba(74, 52, 28, 0.45);
+  --shadow-pop: 0 18px 50px -22px rgba(74, 52, 28, 0.55);
+  --ring: 0 0 0 3px rgba(232, 92, 106, 0.32);
+}
+
+@theme inline {
+  --color-paper: var(--paper);
+  --color-paper-2: var(--paper-2);
+  --color-surface: var(--surface);
+  --color-sunk: var(--sunk);
+  --color-ink: var(--ink);
+  --color-ink-soft: var(--ink-soft);
+  --color-ink-faint: var(--ink-faint);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-berry: var(--berry);
+  --color-berry-deep: var(--berry-deep);
+  --color-honey: var(--honey);
+  --color-honey-deep: var(--honey-deep);
+  --color-marker: var(--marker);
+  --color-leaf: var(--leaf);
+  --color-grape: var(--grape);
+
+  --font-display: var(--font-bricolage), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-nunito), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-dm-mono), ui-monospace, "SF Mono", monospace;
+
+  --radius-card: var(--radius);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  min-height: 100dvh;
+  background-color: var(--paper);
+  /* faint graph-paper grid — a quiet nod to math, never loud */
+  background-image:
+    linear-gradient(rgba(141, 120, 102, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(141, 120, 102, 0.05) 1px, transparent 1px);
+  background-size: 26px 26px;
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.08;
+  margin: 0;
+  color: var(--ink);
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+::selection {
+  background: var(--marker);
+  color: var(--marker-ink);
+}
+
+/* keyboard focus — visible everywhere (quality floor) */
+:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+  border-radius: var(--radius-sm);
+}
+
+/* ---- buttons -------------------------------------------------------------- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-sans);
+  font-weight: 800;
+  font-size: 14px;
+  line-height: 1;
+  padding: 10px 16px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition:
+    transform 0.12s ease,
+    background-color 0.15s ease,
+    box-shadow 0.15s ease,
+    border-color 0.15s ease;
+  white-space: nowrap;
+}
+.btn:active {
+  transform: translateY(1px);
+}
+.btn-primary {
+  background: var(--berry);
+  color: #fff;
+  box-shadow: 0 8px 18px -10px rgba(207, 70, 89, 0.9);
+}
+.btn-primary:hover {
+  background: var(--berry-deep);
+}
+.btn-ghost {
+  background: var(--surface);
+  color: var(--ink);
+  border-color: var(--line-strong);
+}
+.btn-ghost:hover {
+  background: var(--paper-2);
+  border-color: var(--honey);
+}
+.btn-quiet {
+  background: transparent;
+  color: var(--ink-soft);
+  padding: 8px 12px;
+}
+.btn-quiet:hover {
+  background: var(--paper-2);
+  color: var(--ink);
+}
+.btn-danger {
+  background: var(--surface);
+  color: var(--berry-deep);
+  border-color: #f1c7cd;
+}
+.btn-danger:hover {
+  background: var(--berry-wash);
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.btn-sm {
+  padding: 7px 12px;
+  font-size: 13px;
+}
+
+/* ---- surfaces ------------------------------------------------------------- */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-card);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  padding: 4px 9px;
+  border-radius: 7px;
+  background: var(--paper-2);
+  color: var(--ink-soft);
+  border: 1px solid var(--line);
+}
+.chip-role {
+  background: #efe7fb;
+  color: #51449a;
+  border-color: #ddd0f4;
+}
+.chip-leaf {
+  background: var(--leaf-wash);
+  color: #1f7a55;
+  border-color: #c4e6d5;
+}
+
+/* ---- the signature: teacher-only marker ----------------------------------- */
+/* A swiped highlighter streak behind a label. Reserved for teacher-only. */
+.marker-tag {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--marker-ink);
+  padding: 3px 8px;
+  isolation: isolate;
+}
+.marker-tag::before {
+  content: "";
+  position: absolute;
+  inset: 1px -2px 2px -2px;
+  z-index: -1;
+  background: var(--marker);
+  /* uneven felt-tip edges */
+  border-radius: 8px 10px 7px 11px / 10px 8px 11px 7px;
+  transform: rotate(-1.4deg);
+  mix-blend-mode: multiply;
+}
+
+/* the swipe behind a filename when an item is teacher-only */
+.marker-name {
+  position: relative;
+  isolation: isolate;
+}
+.marker-name::after {
+  content: "";
+  position: absolute;
+  left: -3px;
+  right: -3px;
+  bottom: 1px;
+  height: 0.62em;
+  z-index: -1;
+  background: var(--marker);
+  opacity: 0.85;
+  border-radius: 5px 8px 6px 9px / 9px 6px 8px 5px;
+  transform: rotate(-0.6deg);
+  mix-blend-mode: multiply;
+}
+
+/* ---- inputs --------------------------------------------------------------- */
+.field {
+  width: 100%;
+  font-family: var(--font-sans);
+  font-size: 15px;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: 10px 13px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.field::placeholder {
+  color: var(--ink-faint);
+}
+.field:focus {
+  outline: none;
+  border-color: var(--berry);
+  box-shadow: var(--ring);
+}
+.label {
+  display: block;
+  font-weight: 800;
+  font-size: 13px;
+  color: var(--ink);
+  margin-bottom: 6px;
+}
+
+/* ---- motion --------------------------------------------------------------- */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.rise {
+  animation: rise 0.4s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: scale(0.97) translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+.pop {
+  animation: pop 0.16s ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* utility scrollbar polish */
+.scroll-soft::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.scroll-soft::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border-radius: 999px;
+  border: 3px solid var(--paper);
+}
