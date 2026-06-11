@@ -35,6 +35,10 @@ export async function resumableUpload(opts: {
       retryDelays: [0, 1000, 3000, 5000, 10000],
       headers: {
         authorization: `Bearer ${session.access_token}`,
+        // Without apikey, Supabase's gateway resolves the request to the anon
+        // role and RLS on storage.objects rejects it (403). Both headers are
+        // required for the TUS endpoint to see the signed-in user.
+        apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
         "x-upsert": "true",
       },
       uploadDataDuringCreation: true,
