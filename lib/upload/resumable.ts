@@ -5,8 +5,11 @@ const BUCKET = "course-materials";
 // Supabase's resumable (TUS) endpoint requires a 6MB chunk size exactly.
 const CHUNK_SIZE = 6 * 1024 * 1024;
 
-export interface ResumableUploadHandle {
-  abort: () => void;
+interface UploadOpts {
+  file: File;
+  objectName: string; // courses/{courseId}/{fileId}.pdf
+  onProgress?: (sent: number, total: number) => void;
+  signal?: AbortSignal;
 }
 
 /**
@@ -14,30 +17,48 @@ export interface ResumableUploadHandle {
  * A dropped connection resumes from the last chunk rather than restarting —
  * essential for big files and large batches. The object name is the file's
  * uuid so moves between folders never touch storage.
+ *
+ * If the TUS endpoint can't be used (e.g. a gateway/auth quirk), we fall back
+ * to the standard supabase-js upload, which authenticates through the same
+ * client that works everywhere else. The byte-progress is coarser on the
+ * fallback path, but the upload still completes.
  */
-export async function resumableUpload(opts: {
-  file: File;
-  objectName: string; // courses/{courseId}/{fileId}.pdf
-  onProgress?: (sent: number, total: number) => void;
-  signal?: AbortSignal;
-}): Promise<void> {
+export async function resumableUpload(opts: UploadOpts): Promise<void> {
   const supabase = createClient();
   const {
     data: { session },
   } = await supabase.auth.getSession();
   if (!session) throw new Error("Not signed in.");
 
+  try {
+    await tusUpload(opts, session.access_token);
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") throw err;
+    // Fall back to a single-request upload. supabase-js sends the apikey +
+    // authorization headers and refreshes the token as needed.
+    opts.onProgress?.(0, opts.file.size);
+    const { error } = await supabase.storage
+      .from(BUCKET)
+      .upload(opts.objectName, opts.file, {
+        contentType: "application/pdf",
+        upsert: true,
+      });
+    if (error) throw error;
+    opts.onProgress?.(opts.file.size, opts.file.size);
+  }
+}
+
+function tusUpload(opts: UploadOpts, accessToken: string): Promise<void> {
   const endpoint = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/upload/resumable`;
 
-  await new Promise<void>((resolve, reject) => {
+  return new Promise<void>((resolve, reject) => {
     const upload = new tus.Upload(opts.file, {
       endpoint,
-      retryDelays: [0, 1000, 3000, 5000, 10000],
+      retryDelays: [0, 1000, 3000, 5000],
       headers: {
-        authorization: `Bearer ${session.access_token}`,
-        // Without apikey, Supabase's gateway resolves the request to the anon
-        // role and RLS on storage.objects rejects it (403). Both headers are
-        // required for the TUS endpoint to see the signed-in user.
+        authorization: `Bearer ${accessToken}`,
+        // Both headers are required or the gateway resolves the request to the
+        // anon role and storage RLS rejects it.
         apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
         "x-upsert": "true",
       },
@@ -60,7 +81,6 @@ export async function resumableUpload(opts: {
       reject(new DOMException("Aborted", "AbortError"));
     });
 
-    // Resume from a previous attempt if the browser remembers this file.
     upload.findPreviousUploads().then((previous) => {
       if (previous.length > 0) upload.resumeFromPreviousUpload(previous[0]);
       upload.start();
