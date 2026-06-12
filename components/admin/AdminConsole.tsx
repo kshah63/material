@@ -15,6 +15,8 @@ import {
   CheckIcon,
 } from "@/components/icons";
 import { roleLabel } from "@/lib/format";
+import { GRADES } from "@/lib/options";
+import { SchoolSelect } from "@/components/forms/SchoolSelect";
 import {
   createCourse,
   setCourseArchived,
@@ -420,20 +422,23 @@ function InviteModal({
         </select>
 
         {accountRole === "student" && (
-          <div className="flex gap-2" style={{ marginTop: 14 }}>
-            <div className="flex-1">
-              <label className="label">
-                Grade <span style={{ color: "var(--ink-faint)", fontWeight: 600 }}>(optional)</span>
-              </label>
-              <input className="field" value={grade} onChange={(e) => setGrade(e.target.value)} placeholder="11" />
-            </div>
-            <div style={{ flex: 2 }}>
-              <label className="label">
-                School <span style={{ color: "var(--ink-faint)", fontWeight: 600 }}>(optional)</span>
-              </label>
-              <input className="field" value={school} onChange={(e) => setSchool(e.target.value)} placeholder="Their school" />
-            </div>
-          </div>
+          <>
+            <label className="label" style={{ marginTop: 14 }}>
+              Grade <span style={{ color: "var(--ink-faint)", fontWeight: 600 }}>(optional)</span>
+            </label>
+            <select className="field" value={grade} onChange={(e) => setGrade(e.target.value)}>
+              <option value="">No grade yet</option>
+              {GRADES.map((g) => (
+                <option key={g} value={g}>
+                  {g}
+                </option>
+              ))}
+            </select>
+            <label className="label" style={{ marginTop: 14 }}>
+              School <span style={{ color: "var(--ink-faint)", fontWeight: 600 }}>(optional)</span>
+            </label>
+            <SchoolSelect value={school} onChange={setSchool} />
+          </>
         )}
 
         <label className="label" style={{ marginTop: 14 }}>

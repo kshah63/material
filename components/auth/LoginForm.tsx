@@ -4,6 +4,8 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { SpinnerIcon, MarkerIcon } from "@/components/icons";
+import { SchoolSelect } from "@/components/forms/SchoolSelect";
+import { GRADES } from "@/lib/options";
 import type { AccountRole } from "@/lib/types";
 
 type Mode = "password" | "magic" | "signup";
@@ -166,34 +168,33 @@ export function LoginForm({ next }: { next: string }) {
           </div>
 
           {accountRole === "student" && (
-            <div className="mb-4 flex gap-2">
-              <div className="flex-1">
+            <>
+              <div className="mb-4">
                 <label className="label" htmlFor="grade">
                   Grade
                 </label>
-                <input
+                <select
                   id="grade"
                   required
                   className="field"
-                  placeholder="e.g. 11"
                   value={grade}
                   onChange={(e) => setGrade(e.target.value)}
-                />
+                >
+                  <option value="">Select your grade…</option>
+                  {GRADES.map((g) => (
+                    <option key={g} value={g}>
+                      {g}
+                    </option>
+                  ))}
+                </select>
               </div>
-              <div style={{ flex: 2 }}>
+              <div className="mb-4">
                 <label className="label" htmlFor="school">
                   School
                 </label>
-                <input
-                  id="school"
-                  required
-                  className="field"
-                  placeholder="Your school"
-                  value={school}
-                  onChange={(e) => setSchool(e.target.value)}
-                />
+                <SchoolSelect id="school" required value={school} onChange={setSchool} />
               </div>
-            </div>
+            </>
           )}
         </>
       )}
