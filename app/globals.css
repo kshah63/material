@@ -2,8 +2,9 @@
 
 /* =============================================================================
    MathVision Materials Portal — warm / approachable design system
-   Grounded in a math study room: warm paper, honey folders, and a butter
-   highlighter that means one thing only — "teacher-only".
+   Anchored on the MathVision brand: chevron-orange (#F15A29) as the hero,
+   deep indigo (#2E3192) as the structural counter-note, on warm study-room
+   paper. The butter highlighter still means one thing only — "teacher-only".
    ========================================================================== */
 
 :root {
@@ -12,30 +13,32 @@
   --paper-2: #f6ecdd;
   --surface: #fffdfa;
   --sunk: #f1e6d4;
-  --ink: #33271b;
-  --ink-soft: #8a7866;
-  --ink-faint: #b6a795;
+  --ink: #2b2417;
+  --ink-soft: #857764;
+  --ink-faint: #b4a692;
   --line: #ece0cd;
-  --line-strong: #ddcdb4;
+  --line-strong: #dccdb3;
 
-  /* warm accents */
-  --berry: #e85c6a; /* primary action — strawberry */
-  --berry-deep: #cf4659;
-  --berry-wash: #fdeceedd;
-  --honey: #f2b14e; /* folders */
+  /* MathVision brand — orange hero, indigo counter-note */
+  --berry: #f15a29; /* primary action — MathVision chevron orange */
+  --berry-deep: #d8431a; /* hover / pressed */
+  --berry-wash: #fdece2; /* tinted selection / wash */
+  --honey: #f2b14e; /* folders — warm manila */
   --honey-deep: #d99327;
   --marker: #ffd766; /* teacher-only highlighter — used for nothing else */
   --marker-ink: #6a4e0e;
   --leaf: #3aa279; /* success / restore */
   --leaf-wash: #e6f4ec;
-  --grape: #6e62b6; /* rare structural accent */
+  --grape: #2e3192; /* MathVision indigo — structural accent */
+  --grape-deep: #232579;
+  --grape-wash: #e9eaf6;
 
   --radius: 14px;
   --radius-sm: 9px;
   --radius-lg: 22px;
   --shadow-card: 0 1px 0 #ffffff inset, 0 6px 22px -14px rgba(74, 52, 28, 0.45);
   --shadow-pop: 0 18px 50px -22px rgba(74, 52, 28, 0.55);
-  --ring: 0 0 0 3px rgba(232, 92, 106, 0.32);
+  --ring: 0 0 0 3px rgba(241, 90, 41, 0.3);
 }
 
 @theme inline {
@@ -56,7 +59,7 @@
   --color-leaf: var(--leaf);
   --color-grape: var(--grape);
 
-  --font-display: var(--font-bricolage), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-montserrat), ui-sans-serif, system-ui, sans-serif;
   --font-sans: var(--font-nunito), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-dm-mono), ui-monospace, "SF Mono", monospace;
 
@@ -146,10 +149,18 @@ a {
 .btn-primary {
   background: var(--berry);
   color: #fff;
-  box-shadow: 0 8px 18px -10px rgba(207, 70, 89, 0.9);
+  box-shadow: 0 8px 18px -10px rgba(241, 90, 41, 0.95);
 }
 .btn-primary:hover {
   background: var(--berry-deep);
+}
+.btn-indigo {
+  background: var(--grape);
+  color: #fff;
+  box-shadow: 0 8px 18px -10px rgba(46, 49, 146, 0.85);
+}
+.btn-indigo:hover {
+  background: var(--grape-deep);
 }
 .btn-ghost {
   background: var(--surface);
@@ -158,7 +169,7 @@ a {
 }
 .btn-ghost:hover {
   background: var(--paper-2);
-  border-color: var(--honey);
+  border-color: var(--berry);
 }
 .btn-quiet {
   background: transparent;
@@ -209,9 +220,9 @@ a {
   border: 1px solid var(--line);
 }
 .chip-role {
-  background: #efe7fb;
-  color: #51449a;
-  border-color: #ddd0f4;
+  background: var(--grape-wash);
+  color: var(--grape-deep);
+  border-color: #d4d6ef;
 }
 .chip-leaf {
   background: var(--leaf-wash);

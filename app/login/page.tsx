@@ -1,4 +1,4 @@
-import { Logo } from "@/components/Logo";
+import { Logo, MathVisionMark } from "@/components/Logo";
 import { LoginForm } from "@/components/auth/LoginForm";
 
 export default async function LoginPage({
@@ -10,48 +10,55 @@ export default async function LoginPage({
 
   return (
     <main className="min-h-dvh grid lg:grid-cols-[1.1fr_1fr]">
-      {/* Brand panel */}
+      {/* Brand panel — MathVision orange, with an indigo wash and the chevron */}
       <aside
-        className="hidden lg:flex flex-col justify-between p-12 text-ink relative overflow-hidden"
-        style={{ background: "var(--paper-2)" }}
+        className="hidden lg:flex flex-col justify-between p-12 relative overflow-hidden"
+        style={{
+          background:
+            "linear-gradient(155deg, #f15a29 0%, #ec4f22 52%, #d8431a 100%)",
+        }}
       >
-        <Logo />
+        <Logo tone="light" />
         <div className="relative z-10 max-w-md">
           <p
             className="mono mb-4"
-            style={{ color: "var(--honey-deep)", fontSize: 12, letterSpacing: "0.1em" }}
+            style={{ color: "rgba(255,255,255,0.78)", fontSize: 12, letterSpacing: "0.12em" }}
           >
             COURSE MATERIALS, ORGANIZED
           </p>
-          <h1 style={{ fontSize: 46, lineHeight: 1.02 }}>
+          <h1 style={{ fontSize: 46, lineHeight: 1.04, color: "#fff" }}>
             Every worksheet,
             <br />
             note, and packet —
             <br />
-            <span className="marker-name">in one place</span>.
+            <span style={{ color: "#ffd766" }}>in one place</span>.
           </h1>
-          <p style={{ color: "var(--ink-soft)", marginTop: 18, fontSize: 16 }}>
+          <p style={{ color: "rgba(255,255,255,0.86)", marginTop: 18, fontSize: 16 }}>
             A shared shelf for each course. Teachers curate; students study. The
             butter-yellow highlight marks what&apos;s for teachers&apos; eyes only.
           </p>
         </div>
-        <div
-          className="mono"
-          style={{ color: "var(--ink-faint)", fontSize: 12 }}
-        >
-          MathVision · staff & students
+        <div className="mono relative z-10" style={{ color: "rgba(255,255,255,0.7)", fontSize: 12 }}>
+          MathVision · staff &amp; students
         </div>
-        {/* ambient graph corner */}
+        {/* ambient indigo glow */}
         <div
           aria-hidden
-          className="absolute -right-24 -bottom-24 rounded-full"
+          className="absolute -left-32 -top-24 rounded-full"
           style={{
-            width: 360,
-            height: 360,
-            background:
-              "radial-gradient(circle at 30% 30%, rgba(255,215,102,0.5), transparent 60%)",
+            width: 420,
+            height: 420,
+            background: "radial-gradient(circle at 50% 50%, rgba(46,49,146,0.55), transparent 62%)",
           }}
         />
+        {/* oversized watermark chevron */}
+        <div
+          aria-hidden
+          className="absolute"
+          style={{ right: -90, bottom: -70, opacity: 0.12 }}
+        >
+          <MathVisionMark size={420} bare mono="#ffffff" />
+        </div>
       </aside>
 
       {/* Form panel */}

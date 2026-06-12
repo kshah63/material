@@ -1,11 +1,13 @@
 import type { Metadata } from "next";
-import { Bricolage_Grotesque, Nunito_Sans, DM_Mono } from "next/font/google";
+import { Montserrat, Nunito_Sans, DM_Mono } from "next/font/google";
 import "./globals.css";
 
-const bricolage = Bricolage_Grotesque({
-  variable: "--font-bricolage",
+// Montserrat echoes the geometric MathVision wordmark; Nunito keeps the body
+// warm and friendly; DM Mono for labels/figures.
+const montserrat = Montserrat({
+  variable: "--font-montserrat",
   subsets: ["latin"],
-  weight: ["500", "600", "700", "800"],
+  weight: ["600", "700", "800", "900"],
   display: "swap",
 });
 
@@ -26,6 +28,14 @@ const dmMono = DM_Mono({
 export const metadata: Metadata = {
   title: "MathVision Materials",
   description: "Course materials for MathVision — notes, worksheets, and more.",
+  icons: {
+    icon: [{ url: "/mathvision-icon.svg", type: "image/svg+xml" }],
+    apple: [{ url: "/mathvision-icon.svg" }],
+  },
+};
+
+export const viewport = {
+  themeColor: "#F15A29",
 };
 
 export default function RootLayout({
@@ -36,7 +46,8 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${bricolage.variable} ${nunito.variable} ${dmMono.variable}`}
+      className={`${montserrat.variable} ${nunito.variable} ${dmMono.variable}`}
+      suppressHydrationWarning
     >
       <body>{children}</body>
     </html>

@@ -143,7 +143,7 @@ export function LoginForm({ next }: { next: string }) {
                     fontWeight: 800,
                     fontSize: 14,
                     border: `2px solid ${accountRole === r ? "var(--berry)" : "var(--line)"}`,
-                    background: accountRole === r ? "var(--berry-tint, rgba(232,92,106,0.08))" : "transparent",
+                    background: accountRole === r ? "var(--berry-wash)" : "transparent",
                     color: accountRole === r ? "var(--berry-deep)" : "var(--ink-soft)",
                     transition: "border-color .12s ease, color .12s ease",
                   }}

@@ -57,8 +57,9 @@ export function MovePicker({
   const rowStyle = (active: boolean, disabled: boolean): React.CSSProperties => ({
     padding: "9px 10px",
     borderRadius: 9,
-    background: active ? "var(--marker)" : "transparent",
-    color: disabled ? "var(--ink-faint)" : "var(--ink)",
+    background: active ? "var(--berry-wash)" : "transparent",
+    color: disabled ? "var(--ink-faint)" : active ? "var(--berry-deep)" : "var(--ink)",
+    boxShadow: active ? "inset 0 0 0 1.5px var(--berry)" : "none",
     cursor: disabled ? "not-allowed" : "pointer",
     opacity: disabled ? 0.55 : 1,
   });

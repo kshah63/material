@@ -213,7 +213,7 @@ export function FileItemRow({
       <button onClick={onOpen} className="flex items-center gap-3 min-w-0 flex-1 text-left">
         <span
           className="grid place-items-center rounded-[9px] shrink-0"
-          style={{ width: 38, height: 38, background: "#fdecee", color: "var(--berry)" }}
+          style={{ width: 38, height: 38, background: "#fdeadf", color: "var(--berry)" }}
         >
           <PdfIcon width={21} height={21} />
         </span>

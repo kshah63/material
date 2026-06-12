@@ -446,7 +446,7 @@ export function Browser(props: BrowserProps) {
       {dragging && caps.canManage && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-8"
-          style={{ background: "rgba(232,92,106,0.10)" }}
+          style={{ background: "rgba(241,90,41,0.12)" }}
         >
           <div
             className="flex flex-col items-center gap-3 text-center"

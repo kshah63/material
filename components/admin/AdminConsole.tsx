@@ -146,7 +146,7 @@ export function AdminConsole({
               <div key={c.id} className="card flex items-center gap-3" style={{ padding: 14 }}>
                 <span
                   className="grid place-items-center rounded-[10px] mono shrink-0"
-                  style={{ width: 42, height: 42, fontSize: 12, background: "var(--marker)", color: "var(--marker-ink)" }}
+                  style={{ width: 42, height: 42, fontSize: 12, background: "var(--grape)", color: "#fff" }}
                 >
                   {(c.code ?? c.name).slice(0, 3).toUpperCase()}
                 </span>

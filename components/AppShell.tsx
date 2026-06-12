@@ -60,8 +60,8 @@ function NavCourses({
                 height: 30,
                 fontSize: 11,
                 fontWeight: 500,
-                background: isActive ? "var(--marker)" : "var(--paper-2)",
-                color: isActive ? "var(--marker-ink)" : "var(--ink-soft)",
+                background: isActive ? "var(--grape)" : "var(--paper-2)",
+                color: isActive ? "#fff" : "var(--ink-soft)",
               }}
             >
               {(c.code ?? c.name).slice(0, 3).toUpperCase()}

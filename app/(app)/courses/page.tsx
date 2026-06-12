@@ -25,10 +25,9 @@ function CourseCard({ course }: { course: CourseWithRole }) {
             height: 48,
             fontSize: 15,
             fontWeight: 500,
-            background: "var(--marker)",
-            color: "var(--marker-ink)",
-            // little folder-tab nick
-            boxShadow: "0 6px 14px -10px rgba(217,147,39,0.9)",
+            background: "linear-gradient(150deg, var(--grape), var(--grape-deep))",
+            color: "#fff",
+            boxShadow: "0 6px 14px -10px rgba(46,49,146,0.9)",
           }}
         >
           {initials}
