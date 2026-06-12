@@ -155,46 +155,132 @@ export async function declineEnrollment(requestId: string) {
 
 // --- roster management (admin or course in_charge) ------------------------------
 
+export interface PersonHit {
+  id: string;
+  full_name: string | null;
+  email: string;
+  account_role: "student" | "teacher";
+  grade: string | null;
+  school: string | null;
+  alreadyMember: boolean;
+}
+
 /**
- * Add someone to the course by email. The account must already exist and be
- * approved — there's no shadow-invite here; admins invite from the console.
+ * Find approved accounts by name or email for the roster typeahead. The lookup
+ * runs with the service role AFTER verifying the caller manages this course —
+ * in_charges can't read arbitrary profiles directly.
  */
-export async function addMemberByEmail(
-  courseId: string,
-  email: string,
-  role: CourseRole,
-) {
+export async function searchPeople(courseId: string, query: string) {
   const guard = await canManageCourse(courseId);
   if (!guard.ok) return guard;
-  if (role === "in_charge" && !guard.isAdmin) {
-    return { ok: false as const, error: "Only admins can assign an in-charge." };
-  }
 
-  const normalized = email.trim().toLowerCase();
-  if (!normalized) return { ok: false as const, error: "Email is required." };
+  // Strip characters that have meaning in PostgREST or-filters / LIKE patterns.
+  const q = query.trim().replace(/[,()%_]/g, "");
+  if (q.length < 2) return { ok: true as const, results: [] as PersonHit[] };
+
+  const admin = createServiceClient();
+  const [{ data: people }, { data: members }] = await Promise.all([
+    admin
+      .from("profiles")
+      .select("id, full_name, email, account_role, grade, school")
+      .eq("status", "approved")
+      .or(`full_name.ilike.%${q}%,email.ilike.%${q}%`)
+      .order("full_name", { ascending: true })
+      .limit(8),
+    admin
+      .from("course_memberships")
+      .select("user_id")
+      .eq("course_id", courseId),
+  ]);
+
+  const memberIds = new Set((members ?? []).map((m) => m.user_id));
+  const results: PersonHit[] = (people ?? []).map((p) => ({
+    ...p,
+    account_role: p.account_role === "teacher" ? "teacher" : "student",
+    alreadyMember: memberIds.has(p.id),
+  }));
+  return { ok: true as const, results };
+}
+
+/** Add one person (from a search hit). Role mirrors their account type. */
+export async function addMember(courseId: string, userId: string) {
+  const guard = await canManageCourse(courseId);
+  if (!guard.ok) return guard;
 
   const admin = createServiceClient();
   const { data: person } = await admin
     .from("profiles")
-    .select("id, status")
-    .eq("email", normalized)
+    .select("account_role, status")
+    .eq("id", userId)
     .maybeSingle();
-  if (!person) {
-    return { ok: false as const, error: "No account with that email yet — ask them to sign up first." };
-  }
+  if (!person) return { ok: false as const, error: "Account not found." };
   if (person.status !== "approved") {
     return { ok: false as const, error: "That account is still waiting for admin approval." };
   }
 
   const supabase = await createClient();
   const { error } = await supabase.from("course_memberships").upsert(
-    { course_id: courseId, user_id: person.id, role },
+    {
+      course_id: courseId,
+      user_id: userId,
+      role: person.account_role === "teacher" ? "teacher" : "student",
+    },
     { onConflict: "course_id,user_id" },
   );
   if (error) return { ok: false as const, error: error.message };
 
   revalidatePath(`/courses/${courseId}/people`);
   return { ok: true as const };
+}
+
+/** Bulk-add every approved student in a grade and/or school as course students. */
+export async function addStudentsByGroup(
+  courseId: string,
+  filter: { grade?: string; school?: string },
+) {
+  const guard = await canManageCourse(courseId);
+  if (!guard.ok) return guard;
+  if (!filter.grade && !filter.school) {
+    return { ok: false as const, error: "Pick a grade or a school first." };
+  }
+
+  const admin = createServiceClient();
+  let query = admin
+    .from("profiles")
+    .select("id")
+    .eq("status", "approved")
+    .eq("account_role", "student");
+  if (filter.grade) query = query.eq("grade", filter.grade);
+  if (filter.school) query = query.eq("school", filter.school);
+  const { data: students } = await query;
+
+  if (!students || students.length === 0) {
+    return { ok: false as const, error: "No approved students match that group." };
+  }
+
+  const { data: members } = await admin
+    .from("course_memberships")
+    .select("user_id")
+    .eq("course_id", courseId);
+  const memberIds = new Set((members ?? []).map((m) => m.user_id));
+  const newcomers = students.filter((s) => !memberIds.has(s.id));
+  if (newcomers.length === 0) {
+    return { ok: false as const, error: "Everyone in that group is already in the course." };
+  }
+
+  // Insert as the caller so RLS (in_charge may add students) stays the gate.
+  const supabase = await createClient();
+  const { error } = await supabase.from("course_memberships").insert(
+    newcomers.map((s) => ({
+      course_id: courseId,
+      user_id: s.id,
+      role: "student" as const,
+    })),
+  );
+  if (error) return { ok: false as const, error: error.message };
+
+  revalidatePath(`/courses/${courseId}/people`);
+  return { ok: true as const, added: newcomers.length };
 }
 
 /** Change a member's role. RLS stops a non-admin touching in_charge rows. */

@@ -163,6 +163,38 @@ run twice (harmless, but tidy).
 
 ---
 
+## 7. Google Drive import (optional)
+
+Lets in-charges pick PDFs straight from Google Drive (native Picker popup).
+The "Import from Google Drive" menu item stays hidden until both env vars exist.
+
+1. **Google Cloud Console → create a project** (or reuse one).
+2. **APIs & Services → Library:** enable **Google Picker API** and
+   **Google Drive API**.
+3. **APIs & Services → OAuth consent screen:** User type **External**, fill in
+   app name + support email. Scope needed: `…/auth/drive.file` (non-sensitive —
+   no Google verification required). **Publish** the app (or add your teachers
+   as test users while trying it out).
+4. **Credentials → Create credentials → OAuth client ID:** type **Web
+   application**. Add your origins under **Authorized JavaScript origins**:
+   `https://<your-domain>` and `http://localhost:3000`. No redirect URIs needed
+   (token flow runs in a popup).
+5. **Credentials → Create credentials → API key.** Restrict it: **Websites** →
+   same origins; **APIs** → Google Picker API.
+6. Add to Vercel env (and `.env.local`), then redeploy:
+
+   | Name | Value |
+   |---|---|
+   | `NEXT_PUBLIC_GOOGLE_CLIENT_ID` | the OAuth client ID (`…apps.googleusercontent.com`) |
+   | `NEXT_PUBLIC_GOOGLE_API_KEY` | the API key |
+
+The app uses the `drive.file` scope, so it can only ever read files the user
+explicitly picks — it never sees the rest of their Drive. Downloads happen in
+the browser and then go through the normal upload pipeline (progress, resumable
+chunks, cancel).
+
+---
+
 ## Troubleshooting
 
 - **Invite emails don't arrive.** You're hitting Supabase's built-in email limits

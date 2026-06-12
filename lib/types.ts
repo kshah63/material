@@ -13,6 +13,8 @@ export interface Profile {
   app_role: AppRole;
   account_role: AccountRole;
   status: AccountStatus;
+  grade: string | null; // students only
+  school: string | null; // students only
   created_at: string;
 }
 

@@ -26,6 +26,8 @@ export async function requireProfile(): Promise<Profile> {
       app_role: "member" as const,
       account_role: "student" as const,
       status: "approved" as const,
+      grade: null,
+      school: null,
       created_at: new Date().toISOString(),
     }
   );

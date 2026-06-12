@@ -211,3 +211,11 @@ export const SpinnerIcon = (p: IconProps) => (
     </path>
   </svg>
 );
+
+export const DriveIcon = (p: IconProps) => (
+  <Base {...p}>
+    <path d="M12 9.6 6.3 19.5 3.6 15 9.3 5z" />
+    <path d="M9.6 14.7H21l-2.7 4.8H6.3" />
+    <path d="M14.7 14.7 9.3 5h5.4l5.7 9.7z" />
+  </Base>
+);

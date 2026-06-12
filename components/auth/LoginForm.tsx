@@ -15,6 +15,8 @@ export function LoginForm({ next }: { next: string }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
+  const [grade, setGrade] = useState("");
+  const [school, setSchool] = useState("");
   const [accountRole, setAccountRole] = useState<AccountRole>("student");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -35,12 +37,21 @@ export function LoginForm({ next }: { next: string }) {
         router.refresh();
       } else if (mode === "signup") {
         if (!fullName.trim()) throw new Error("Please enter your name.");
+        if (accountRole === "student" && (!grade.trim() || !school.trim())) {
+          throw new Error("Please enter your grade and school.");
+        }
         const { data, error } = await supabase.auth.signUp({
           email: email.trim(),
           password,
           options: {
             // handle_new_user reads these into the profiles row.
-            data: { full_name: fullName.trim(), account_role: accountRole },
+            data: {
+              full_name: fullName.trim(),
+              account_role: accountRole,
+              ...(accountRole === "student"
+                ? { grade: grade.trim(), school: school.trim() }
+                : {}),
+            },
             emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
           },
         });
@@ -142,6 +153,37 @@ export function LoginForm({ next }: { next: string }) {
               ))}
             </div>
           </div>
+
+          {accountRole === "student" && (
+            <div className="mb-4 flex gap-2">
+              <div className="flex-1">
+                <label className="label" htmlFor="grade">
+                  Grade
+                </label>
+                <input
+                  id="grade"
+                  required
+                  className="field"
+                  placeholder="e.g. 11"
+                  value={grade}
+                  onChange={(e) => setGrade(e.target.value)}
+                />
+              </div>
+              <div style={{ flex: 2 }}>
+                <label className="label" htmlFor="school">
+                  School
+                </label>
+                <input
+                  id="school"
+                  required
+                  className="field"
+                  placeholder="Your school"
+                  value={school}
+                  onChange={(e) => setSchool(e.target.value)}
+                />
+              </div>
+            </div>
+          )}
         </>
       )}
 

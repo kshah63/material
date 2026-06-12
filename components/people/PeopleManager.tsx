@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/ui/Toast";
@@ -11,14 +11,18 @@ import {
   PlusIcon,
   SpinnerIcon,
   TrashIcon,
+  UsersIcon,
   XIcon,
 } from "@/components/icons";
 import {
-  addMemberByEmail,
+  addMember,
+  addStudentsByGroup,
   approveEnrollment,
   declineEnrollment,
   removeMember,
+  searchPeople,
   setMemberRole,
+  type PersonHit,
 } from "@/app/actions/enrollment";
 import type { CourseJoinRequest, CoursePerson } from "@/lib/queries";
 import type { CourseRole } from "@/lib/types";
@@ -48,6 +52,8 @@ export function PeopleManager({
   selfId,
   members,
   requests,
+  gradeOptions,
+  schoolOptions,
 }: {
   courseId: string;
   courseName: string;
@@ -55,13 +61,39 @@ export function PeopleManager({
   selfId: string;
   members: CoursePerson[];
   requests: CourseJoinRequest[];
+  gradeOptions: string[];
+  schoolOptions: string[];
 }) {
   const router = useRouter();
   const toast = useToast();
-  const [email, setEmail] = useState("");
-  const [addRole, setAddRole] = useState<CourseRole>("student");
-  const [busyAdd, setBusyAdd] = useState(false);
   const [busyRequest, setBusyRequest] = useState<string | null>(null);
+
+  // name/email typeahead
+  const [query, setQuery] = useState("");
+  const [hits, setHits] = useState<PersonHit[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [addingId, setAddingId] = useState<string | null>(null);
+  const searchSeq = useRef(0);
+
+  // bulk add by grade/school
+  const [bulkGrade, setBulkGrade] = useState("");
+  const [bulkSchool, setBulkSchool] = useState("");
+  const [busyBulk, setBusyBulk] = useState(false);
+
+  // Debounced lookup; hits/searching are reset in the input's onChange so the
+  // effect only ever talks to the server.
+  useEffect(() => {
+    const q = query.trim();
+    if (q.length < 2) return;
+    const seq = ++searchSeq.current;
+    const t = setTimeout(async () => {
+      const res = await searchPeople(courseId, q);
+      if (seq !== searchSeq.current) return; // a newer keystroke superseded us
+      setSearching(false);
+      if (res.ok) setHits(res.results);
+    }, 250);
+    return () => clearTimeout(t);
+  }, [query, courseId]);
 
   // in_charge can hand out student/teacher; only admins assign in_charge.
   const assignableRoles: CourseRole[] = isAdmin
@@ -173,6 +205,10 @@ export function PeopleManager({
                 </span>
                 <span style={{ fontSize: 12.5, color: "var(--ink-soft)" }} className="block truncate">
                   {m.profile?.email}
+                  {m.profile?.account_role === "student" &&
+                  (m.profile.grade || m.profile.school)
+                    ? ` · ${[m.profile.grade, m.profile.school].filter(Boolean).join(" · ")}`
+                    : ""}
                 </span>
               </div>
               {locked ? (
@@ -210,55 +246,165 @@ export function PeopleManager({
           );
         })}
 
-        {/* add by email */}
+        {/* add people */}
         <div style={{ borderTop: "1px solid var(--line)", marginTop: 12, paddingTop: 14 }}>
-          <label className="label" htmlFor="add-email">
-            Add a person by email
+          <label className="label" htmlFor="people-search">
+            Add a person
           </label>
-          <form
-            className="flex gap-2"
-            onSubmit={async (e) => {
-              e.preventDefault();
-              if (!email.trim()) return;
-              setBusyAdd(true);
-              const res = await act(addMemberByEmail(courseId, email, addRole), "Added to course");
-              setBusyAdd(false);
-              if (res.ok) setEmail("");
-            }}
-          >
+          <div className="relative">
             <input
-              id="add-email"
-              type="email"
+              id="people-search"
               className="field"
-              placeholder="person@mathvision.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              placeholder="Search by name or email…"
+              value={query}
+              autoComplete="off"
+              onChange={(e) => {
+                const v = e.target.value;
+                setQuery(v);
+                if (v.trim().length < 2) {
+                  setHits([]);
+                  setSearching(false);
+                } else {
+                  setSearching(true);
+                }
+              }}
             />
+            {query.trim().length >= 2 && (
+              <div
+                className="card"
+                style={{
+                  position: "absolute",
+                  top: "calc(100% + 6px)",
+                  left: 0,
+                  right: 0,
+                  zIndex: 30,
+                  padding: 6,
+                  maxHeight: 280,
+                  overflowY: "auto",
+                  boxShadow: "var(--shadow-pop)",
+                }}
+              >
+                {searching && hits.length === 0 ? (
+                  <p style={{ padding: 10, fontSize: 13.5, color: "var(--ink-soft)" }}>
+                    Searching…
+                  </p>
+                ) : hits.length === 0 ? (
+                  <p style={{ padding: 10, fontSize: 13.5, color: "var(--ink-soft)" }}>
+                    No matching approved accounts. New folks can sign up themselves
+                    — once approved, they&apos;ll show up here.
+                  </p>
+                ) : (
+                  hits.map((h) => (
+                    <button
+                      key={h.id}
+                      className="w-full flex items-center gap-2.5 text-left hover:bg-[var(--paper-2)]"
+                      style={{ padding: "8px 8px", borderRadius: 10 }}
+                      disabled={h.alreadyMember || addingId === h.id}
+                      onClick={async () => {
+                        setAddingId(h.id);
+                        const res = await addMember(courseId, h.id);
+                        setAddingId(null);
+                        if (!res.ok) {
+                          toast(res.error ?? "Something went wrong.", "error");
+                        } else {
+                          toast(
+                            `${h.full_name ?? h.email} added as ${roleLabel(h.account_role).toLowerCase()}`,
+                          );
+                          setQuery("");
+                          setHits([]);
+                        }
+                        router.refresh();
+                      }}
+                    >
+                      <Avatar label={h.full_name ?? h.email} muted />
+                      <span className="min-w-0 flex-1">
+                        <span style={{ fontWeight: 800, fontSize: 14 }} className="block truncate">
+                          {h.full_name ?? h.email}
+                        </span>
+                        <span
+                          style={{ fontSize: 12, color: "var(--ink-soft)" }}
+                          className="block truncate"
+                        >
+                          {[
+                            h.email,
+                            roleLabel(h.account_role),
+                            ...(h.account_role === "student"
+                              ? [h.grade, h.school].filter(Boolean)
+                              : []),
+                          ].join(" · ")}
+                        </span>
+                      </span>
+                      {h.alreadyMember ? (
+                        <span className="chip">Member</span>
+                      ) : addingId === h.id ? (
+                        <SpinnerIcon width={16} height={16} />
+                      ) : (
+                        <PlusIcon width={17} height={17} style={{ color: "var(--berry-deep)" }} />
+                      )}
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+
+          <label className="label" style={{ marginTop: 16 }}>
+            Add a whole group of students
+          </label>
+          <div className="flex gap-2 flex-wrap">
             <select
               className="field"
-              style={{ maxWidth: 140 }}
-              value={addRole}
-              onChange={(e) => setAddRole(e.target.value as CourseRole)}
+              style={{ flex: 1, minWidth: 120 }}
+              value={bulkGrade}
+              onChange={(e) => setBulkGrade(e.target.value)}
             >
-              {assignableRoles.map((r) => (
-                <option key={r} value={r}>
-                  {roleLabel(r)}
+              <option value="">Any grade</option>
+              {gradeOptions.map((g) => (
+                <option key={g} value={g}>
+                  {g}
+                </option>
+              ))}
+            </select>
+            <select
+              className="field"
+              style={{ flex: 2, minWidth: 160 }}
+              value={bulkSchool}
+              onChange={(e) => setBulkSchool(e.target.value)}
+            >
+              <option value="">Any school</option>
+              {schoolOptions.map((s) => (
+                <option key={s} value={s}>
+                  {s}
                 </option>
               ))}
             </select>
             <button
-              type="submit"
               className="btn btn-primary"
-              style={{ padding: "0 14px" }}
-              disabled={busyAdd || !email.trim()}
-              aria-label="Add member"
+              disabled={busyBulk || (!bulkGrade && !bulkSchool)}
+              onClick={async () => {
+                setBusyBulk(true);
+                const res = await addStudentsByGroup(courseId, {
+                  grade: bulkGrade || undefined,
+                  school: bulkSchool || undefined,
+                });
+                setBusyBulk(false);
+                if (!res.ok) toast(res.error ?? "Something went wrong.", "error");
+                else toast(`Added ${res.added} student${res.added === 1 ? "" : "s"}`);
+                router.refresh();
+              }}
             >
-              {busyAdd ? <SpinnerIcon width={16} height={16} /> : <PlusIcon width={18} height={18} />}
+              {busyBulk ? (
+                <SpinnerIcon width={16} height={16} />
+              ) : (
+                <>
+                  <UsersIcon width={16} height={16} /> Add all
+                </>
+              )}
             </button>
-          </form>
+          </div>
           <p style={{ fontSize: 12.5, color: "var(--ink-soft)", marginTop: 8 }}>
-            They need an approved account first — new folks can sign up themselves,
-            then you (or an admin) add them here or approve their join request.
+            Group add pulls in every approved student matching the grade/school you
+            pick (they join as students; nobody is added twice).
           </p>
         </div>
       </section>

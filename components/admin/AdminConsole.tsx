@@ -223,7 +223,13 @@ export function AdminConsole({
                     {p.full_name ?? p.email.split("@")[0]}
                   </span>
                   <span style={{ fontSize: 12.5, color: "var(--ink-soft)" }} className="block truncate">
-                    {p.email} · {roleLabel(p.account_role)}
+                    {[
+                      p.email,
+                      roleLabel(p.account_role),
+                      ...(p.account_role === "student"
+                        ? [p.grade, p.school].filter(Boolean)
+                        : []),
+                    ].join(" · ")}
                   </span>
                 </div>
                 {p.status === "pending" ? (
@@ -360,6 +366,8 @@ function InviteModal({
     email: string;
     fullName?: string;
     accountRole?: AccountRole;
+    grade?: string;
+    school?: string;
     courseId?: string;
     role?: CourseRole;
   }) => Promise<void>;
@@ -367,6 +375,8 @@ function InviteModal({
   const [email, setEmail] = useState("");
   const [fullName, setFullName] = useState("");
   const [accountRole, setAccountRole] = useState<AccountRole>("student");
+  const [grade, setGrade] = useState("");
+  const [school, setSchool] = useState("");
   const [courseId, setCourseId] = useState("");
   const [role, setRole] = useState<CourseRole>("student");
   const [busy, setBusy] = useState(false);
@@ -383,6 +393,8 @@ function InviteModal({
             email,
             fullName: fullName || undefined,
             accountRole,
+            grade: accountRole === "student" ? grade.trim() || undefined : undefined,
+            school: accountRole === "student" ? school.trim() || undefined : undefined,
             courseId: courseId || undefined,
             role: courseId ? role : undefined,
           });
@@ -406,6 +418,23 @@ function InviteModal({
           <option value="student">Student</option>
           <option value="teacher">Teacher</option>
         </select>
+
+        {accountRole === "student" && (
+          <div className="flex gap-2" style={{ marginTop: 14 }}>
+            <div className="flex-1">
+              <label className="label">
+                Grade <span style={{ color: "var(--ink-faint)", fontWeight: 600 }}>(optional)</span>
+              </label>
+              <input className="field" value={grade} onChange={(e) => setGrade(e.target.value)} placeholder="11" />
+            </div>
+            <div style={{ flex: 2 }}>
+              <label className="label">
+                School <span style={{ color: "var(--ink-faint)", fontWeight: 600 }}>(optional)</span>
+              </label>
+              <input className="field" value={school} onChange={(e) => setSchool(e.target.value)} placeholder="Their school" />
+            </div>
+          </div>
+        )}
 
         <label className="label" style={{ marginTop: 14 }}>
           Add to a course <span style={{ color: "var(--ink-faint)", fontWeight: 600 }}>(optional)</span>

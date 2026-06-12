@@ -13,6 +13,7 @@ import { ConfirmModal } from "@/components/ui/ConfirmModal";
 import { useToast } from "@/components/ui/Toast";
 import { useUploader } from "@/hooks/useUploader";
 import { filesFromInput, filesFromDataTransfer } from "@/lib/upload/tree";
+import { driveImportConfigured, importFromDrive } from "@/lib/upload/drive";
 import {
   FolderPlusIcon,
   UploadIcon,
@@ -22,6 +23,7 @@ import {
   ChevronDownIcon,
   PdfIcon,
   UsersIcon,
+  DriveIcon,
 } from "@/components/icons";
 import {
   createFolder,
@@ -199,6 +201,29 @@ export function Browser(props: BrowserProps) {
     void uploader.start(picked, existingNames);
   };
 
+  const [driveBusy, setDriveBusy] = useState(false);
+  const importDrive = async () => {
+    setDriveBusy(true);
+    try {
+      const res = await importFromDrive({
+        onPicked: (n) =>
+          toast(`Fetching ${n} file${n === 1 ? "" : "s"} from Google Drive…`),
+      });
+      if (res.canceled) return;
+      if (res.failures.length) {
+        toast(
+          `Couldn't fetch from Drive: ${res.failures.slice(0, 3).join(", ")}${res.failures.length > 3 ? "…" : ""}`,
+          "error",
+        );
+      }
+      startUpload(res.picked);
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Drive import failed.", "error");
+    } finally {
+      setDriveBusy(false);
+    }
+  };
+
   const onDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     dragDepth.current = 0;
@@ -289,6 +314,18 @@ export function Browser(props: BrowserProps) {
                     icon: <FolderPlusIcon width={17} height={17} />,
                     onSelect: () => folderInputRef.current?.click(),
                   },
+                  ...(driveImportConfigured()
+                    ? [
+                        {
+                          label: driveBusy
+                            ? "Importing from Drive…"
+                            : "Import from Google Drive",
+                          icon: <DriveIcon width={17} height={17} />,
+                          onSelect: () => void importDrive(),
+                          disabled: driveBusy,
+                        },
+                      ]
+                    : []),
                 ]}
               />
             </div>
