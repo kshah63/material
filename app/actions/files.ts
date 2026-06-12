@@ -4,6 +4,53 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 
+/**
+ * Mint a pre-authorized signed upload URL for a new object. The permission
+ * check runs under the caller's (always-fresh) server session; the service role
+ * then creates the signed URL. The browser uploads to it WITHOUT needing its own
+ * storage token, which sidesteps browser token-expiry and storage-RLS quirks.
+ */
+export async function createSignedUpload(storagePath: string) {
+  // storagePath = courses/{courseId}/{fileId}.pdf
+  const courseId = storagePath.split("/")[1];
+  if (!courseId) return { ok: false as const, error: "Bad upload path." };
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false as const, error: "Not signed in." };
+
+  // Only platform admins or the course's in_charge may upload.
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("app_role")
+    .eq("id", user.id)
+    .single();
+  let allowed = profile?.app_role === "admin";
+  if (!allowed) {
+    const { data: membership } = await supabase
+      .from("course_memberships")
+      .select("role")
+      .eq("course_id", courseId)
+      .eq("user_id", user.id)
+      .maybeSingle();
+    allowed = membership?.role === "in_charge";
+  }
+  if (!allowed) {
+    return { ok: false as const, error: "You can't upload to this course." };
+  }
+
+  const admin = createServiceClient();
+  const { data, error } = await admin.storage
+    .from("course-materials")
+    .createSignedUploadUrl(storagePath);
+  if (error || !data) {
+    return { ok: false as const, error: error?.message ?? "Could not start upload." };
+  }
+  return { ok: true as const, path: data.path, token: data.token };
+}
+
 interface RegisterFileInput {
   id: string; // client-generated uuid, matches the storage object name
   courseId: string;
