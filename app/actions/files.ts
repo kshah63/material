@@ -154,17 +154,43 @@ export async function softDeleteFile(fileId: string, courseId: string) {
  * Mint a short-lived signed URL for viewing. The select runs under the caller's
  * session — if RLS returns the row they're allowed; the service role only signs.
  * This is the single point where teacher-only is enforced for viewing.
+ *
+ * Downloading is reserved for admins and the course's in_charge: everyone else
+ * gets a view-only URL and no download link. (This removes the affordance, not
+ * the physical possibility — anything a browser can display can be saved.)
  */
 export async function getViewUrl(fileId: string) {
   const userClient = await createClient();
   const { data: file } = await userClient
     .from("files")
-    .select("storage_path, name")
+    .select("storage_path, name, course_id")
     .eq("id", fileId)
     .single();
 
   if (!file) {
     return { ok: false as const, error: "Not found or not permitted." };
+  }
+
+  const {
+    data: { user },
+  } = await userClient.auth.getUser();
+  let canDownload = false;
+  if (user) {
+    const { data: profile } = await userClient
+      .from("profiles")
+      .select("app_role")
+      .eq("id", user.id)
+      .single();
+    canDownload = profile?.app_role === "admin";
+    if (!canDownload) {
+      const { data: membership } = await userClient
+        .from("course_memberships")
+        .select("role")
+        .eq("course_id", file.course_id)
+        .eq("user_id", user.id)
+        .maybeSingle();
+      canDownload = membership?.role === "in_charge";
+    }
   }
 
   const admin = createServiceClient();
@@ -175,5 +201,16 @@ export async function getViewUrl(fileId: string) {
   if (error || !data) {
     return { ok: false as const, error: error?.message ?? "Could not sign URL." };
   }
-  return { ok: true as const, url: data.signedUrl, name: file.name };
+
+  // A separate URL with Content-Disposition: attachment, so the Download
+  // button saves under the file's display name instead of opening a tab.
+  let downloadUrl: string | null = null;
+  if (canDownload) {
+    const { data: dl } = await admin.storage
+      .from("course-materials")
+      .createSignedUrl(file.storage_path, 60, { download: file.name });
+    downloadUrl = dl?.signedUrl ?? null;
+  }
+
+  return { ok: true as const, url: data.signedUrl, downloadUrl, name: file.name };
 }

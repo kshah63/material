@@ -17,6 +17,7 @@ export function Viewer({
   onClose: () => void;
 }) {
   const [url, setUrl] = useState<string | null>(null);
+  const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -25,8 +26,10 @@ export function Viewer({
     let cancelled = false;
     getViewUrl(file.id).then((res) => {
       if (cancelled) return;
-      if (res.ok) setUrl(res.url);
-      else setError(res.error);
+      if (res.ok) {
+        setUrl(res.url);
+        setDownloadUrl(res.downloadUrl);
+      } else setError(res.error);
     });
     return () => {
       cancelled = true;
@@ -63,9 +66,10 @@ export function Viewer({
           )}
         </div>
         <div className="flex items-center gap-2">
-          {url && (
+          {/* Only admins / the course in-charge get a download link. */}
+          {downloadUrl && (
             <a
-              href={url}
+              href={downloadUrl}
               download={file.name}
               className="btn btn-ghost btn-sm"
               target="_blank"
@@ -93,7 +97,9 @@ export function Viewer({
           </div>
         ) : (
           <iframe
-            src={url}
+            // Without download rights, also hide the browser PDF viewer's own
+            // toolbar (it has download/print buttons). Managers keep it.
+            src={downloadUrl ? url : `${url}#toolbar=0&navpanes=0`}
             title={file.name}
             className="w-full h-full rounded-[12px]"
             style={{ background: "#fff", border: "none", maxWidth: 1100 }}
