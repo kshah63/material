@@ -161,6 +161,7 @@ export async function inviteUser(input: {
   accountRole?: "student" | "teacher";
   grade?: string;
   school?: string;
+  country?: string;
   courseId?: string;
   role?: CourseRole;
 }) {
@@ -182,6 +183,7 @@ export async function inviteUser(input: {
         ...(input.fullName ? { full_name: input.fullName } : {}),
         ...(input.grade ? { grade: input.grade } : {}),
         ...(input.school ? { school: input.school } : {}),
+        ...(input.country ? { country: input.country } : {}),
       },
       redirectTo,
     });

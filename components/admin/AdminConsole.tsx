@@ -229,7 +229,7 @@ export function AdminConsole({
                       p.email,
                       roleLabel(p.account_role),
                       ...(p.account_role === "student"
-                        ? [p.grade, p.school].filter(Boolean)
+                        ? [p.grade, p.school, p.country].filter(Boolean)
                         : []),
                     ].join(" · ")}
                   </span>
@@ -370,6 +370,7 @@ function InviteModal({
     accountRole?: AccountRole;
     grade?: string;
     school?: string;
+    country?: string;
     courseId?: string;
     role?: CourseRole;
   }) => Promise<void>;
@@ -379,6 +380,7 @@ function InviteModal({
   const [accountRole, setAccountRole] = useState<AccountRole>("student");
   const [grade, setGrade] = useState("");
   const [school, setSchool] = useState("");
+  const [country, setCountry] = useState("");
   const [courseId, setCourseId] = useState("");
   const [role, setRole] = useState<CourseRole>("student");
   const [busy, setBusy] = useState(false);
@@ -397,6 +399,7 @@ function InviteModal({
             accountRole,
             grade: accountRole === "student" ? grade.trim() || undefined : undefined,
             school: accountRole === "student" ? school.trim() || undefined : undefined,
+            country: accountRole === "student" ? country.trim() || undefined : undefined,
             courseId: courseId || undefined,
             role: courseId ? role : undefined,
           });
@@ -437,7 +440,12 @@ function InviteModal({
             <label className="label" style={{ marginTop: 14 }}>
               School <span style={{ color: "var(--ink-faint)", fontWeight: 600 }}>(optional)</span>
             </label>
-            <SchoolSelect value={school} onChange={setSchool} />
+            <SchoolSelect
+              value={school}
+              onChange={setSchool}
+              country={country}
+              onCountryChange={setCountry}
+            />
           </>
         )}
 

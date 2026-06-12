@@ -4,25 +4,71 @@ import { useState } from "react";
 import { SCHOOLS, SCHOOL_SET } from "@/lib/options";
 
 /**
- * School picker: a dropdown of the known schools plus an "Other / not listed"
- * choice that swaps in a free-text box, so the common case stays clean (exact
- * values that bulk "add all from school" can match) without blocking anyone.
+ * School picker:
+ *  - a dropdown of the known (Singapore) schools, plus
+ *  - "Other (Singapore)" → free-text school, and
+ *  - "Global (Outside SG)" → country + free-text school.
+ * Known schools stay exact (so bulk "add all from school" matches), while the
+ * free-text paths mean no student is ever blocked from registering.
  */
+const OTHER = "__other__";
+const GLOBAL = "__global__";
+
 export function SchoolSelect({
   id,
   value,
   onChange,
+  country = "",
+  onCountryChange,
   required,
 }: {
   id?: string;
   value: string;
   onChange: (v: string) => void;
+  country?: string;
+  onCountryChange?: (v: string) => void;
   required?: boolean;
 }) {
-  // Start in free-text mode if a value was given that isn't a known school.
-  const [other, setOther] = useState(() => Boolean(value) && !SCHOOL_SET.has(value));
+  const [mode, setMode] = useState<string>(() => {
+    if (country) return GLOBAL; // had a country -> outside SG
+    if (value && !SCHOOL_SET.has(value)) return OTHER;
+    return "list";
+  });
 
-  if (other) {
+  const backToList = () => {
+    setMode("list");
+    onChange("");
+    onCountryChange?.("");
+  };
+
+  if (mode === GLOBAL) {
+    return (
+      <div className="flex flex-col gap-2">
+        <input
+          className="field"
+          placeholder="Country"
+          value={country}
+          required={required}
+          onChange={(e) => onCountryChange?.(e.target.value)}
+        />
+        <div className="flex gap-2">
+          <input
+            id={id}
+            className="field"
+            placeholder="School"
+            value={value}
+            required={required}
+            onChange={(e) => onChange(e.target.value)}
+          />
+          <button type="button" className="btn btn-quiet btn-sm shrink-0" onClick={backToList}>
+            Pick from list
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (mode === OTHER) {
     return (
       <div className="flex gap-2">
         <input
@@ -34,14 +80,7 @@ export function SchoolSelect({
           autoFocus
           onChange={(e) => onChange(e.target.value)}
         />
-        <button
-          type="button"
-          className="btn btn-quiet btn-sm shrink-0"
-          onClick={() => {
-            setOther(false);
-            onChange("");
-          }}
-        >
+        <button type="button" className="btn btn-quiet btn-sm shrink-0" onClick={backToList}>
           Pick from list
         </button>
       </div>
@@ -55,11 +94,17 @@ export function SchoolSelect({
       required={required}
       value={SCHOOL_SET.has(value) ? value : ""}
       onChange={(e) => {
-        if (e.target.value === "__other__") {
-          setOther(true);
+        const v = e.target.value;
+        if (v === OTHER) {
+          setMode(OTHER);
+          onChange("");
+          onCountryChange?.("");
+        } else if (v === GLOBAL) {
+          setMode(GLOBAL);
           onChange("");
         } else {
-          onChange(e.target.value);
+          onChange(v);
+          onCountryChange?.("");
         }
       }}
     >
@@ -69,7 +114,8 @@ export function SchoolSelect({
           {s}
         </option>
       ))}
-      <option value="__other__">Other / not listed…</option>
+      <option value={OTHER}>Other (Singapore) / not listed…</option>
+      <option value={GLOBAL}>Global (Outside SG)</option>
     </select>
   );
 }

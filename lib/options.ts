@@ -49,7 +49,6 @@ export const SCHOOLS = [
   "OWIS",
   "SAIS",
   "SAS",
-  "Singapore IB School",
   "SOTA",
   "St Joseph's Institution",
   "St Joseph's Institution International",
@@ -58,6 +57,7 @@ export const SCHOOLS = [
   "UWC East",
   "XCL",
   "YBIS",
+  "University",
   "PVT",
 ] as const;
 

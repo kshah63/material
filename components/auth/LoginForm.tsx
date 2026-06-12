@@ -19,6 +19,7 @@ export function LoginForm({ next }: { next: string }) {
   const [fullName, setFullName] = useState("");
   const [grade, setGrade] = useState("");
   const [school, setSchool] = useState("");
+  const [country, setCountry] = useState("");
   const [accountRole, setAccountRole] = useState<AccountRole>("student");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -51,7 +52,11 @@ export function LoginForm({ next }: { next: string }) {
               full_name: fullName.trim(),
               account_role: accountRole,
               ...(accountRole === "student"
-                ? { grade: grade.trim(), school: school.trim() }
+                ? {
+                    grade: grade.trim(),
+                    school: school.trim(),
+                    ...(country.trim() ? { country: country.trim() } : {}),
+                  }
                 : {}),
             },
             emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
@@ -192,7 +197,14 @@ export function LoginForm({ next }: { next: string }) {
                 <label className="label" htmlFor="school">
                   School
                 </label>
-                <SchoolSelect id="school" required value={school} onChange={setSchool} />
+                <SchoolSelect
+                  id="school"
+                  required
+                  value={school}
+                  onChange={setSchool}
+                  country={country}
+                  onCountryChange={setCountry}
+                />
               </div>
             </>
           )}

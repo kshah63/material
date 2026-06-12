@@ -206,8 +206,8 @@ export function PeopleManager({
                 <span style={{ fontSize: 12.5, color: "var(--ink-soft)" }} className="block truncate">
                   {m.profile?.email}
                   {m.profile?.account_role === "student" &&
-                  (m.profile.grade || m.profile.school)
-                    ? ` · ${[m.profile.grade, m.profile.school].filter(Boolean).join(" · ")}`
+                  (m.profile.grade || m.profile.school || m.profile.country)
+                    ? ` · ${[m.profile.grade, m.profile.school, m.profile.country].filter(Boolean).join(" · ")}`
                     : ""}
                 </span>
               </div>
@@ -329,7 +329,7 @@ export function PeopleManager({
                             h.email,
                             roleLabel(h.account_role),
                             ...(h.account_role === "student"
-                              ? [h.grade, h.school].filter(Boolean)
+                              ? [h.grade, h.school, h.country].filter(Boolean)
                               : []),
                           ].join(" · ")}
                         </span>

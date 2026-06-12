@@ -162,6 +162,7 @@ export interface PersonHit {
   account_role: "student" | "teacher";
   grade: string | null;
   school: string | null;
+  country: string | null;
   alreadyMember: boolean;
 }
 
@@ -182,7 +183,7 @@ export async function searchPeople(courseId: string, query: string) {
   const [{ data: people }, { data: members }] = await Promise.all([
     admin
       .from("profiles")
-      .select("id, full_name, email, account_role, grade, school")
+      .select("id, full_name, email, account_role, grade, school, country")
       .eq("status", "approved")
       .or(`full_name.ilike.%${q}%,email.ilike.%${q}%`)
       .order("full_name", { ascending: true })

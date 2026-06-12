@@ -15,6 +15,7 @@ export interface Profile {
   status: AccountStatus;
   grade: string | null; // students only
   school: string | null; // students only
+  country: string | null; // students outside SG ("Global")
   created_at: string;
 }
 

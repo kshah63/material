@@ -28,6 +28,7 @@ export async function requireProfile(): Promise<Profile> {
       status: "approved" as const,
       grade: null,
       school: null,
+      country: null,
       created_at: new Date().toISOString(),
     }
   );
