@@ -251,102 +251,94 @@ export function PeopleManager({
           <label className="label" htmlFor="people-search">
             Add a person
           </label>
-          <div className="relative">
-            <input
-              id="people-search"
-              className="field"
-              placeholder="Search by name or email…"
-              value={query}
-              autoComplete="off"
-              onChange={(e) => {
-                const v = e.target.value;
-                setQuery(v);
-                if (v.trim().length < 2) {
-                  setHits([]);
-                  setSearching(false);
-                } else {
-                  setSearching(true);
-                }
-              }}
-            />
-            {query.trim().length >= 2 && (
-              <div
-                className="card"
-                style={{
-                  position: "absolute",
-                  top: "calc(100% + 6px)",
-                  left: 0,
-                  right: 0,
-                  zIndex: 30,
-                  padding: 6,
-                  maxHeight: 280,
-                  overflowY: "auto",
-                  boxShadow: "var(--shadow-pop)",
-                }}
-              >
-                {searching && hits.length === 0 ? (
-                  <p style={{ padding: 10, fontSize: 13.5, color: "var(--ink-soft)" }}>
-                    Searching…
-                  </p>
-                ) : hits.length === 0 ? (
-                  <p style={{ padding: 10, fontSize: 13.5, color: "var(--ink-soft)" }}>
-                    No matching approved accounts. New folks can sign up themselves
-                    — once approved, they&apos;ll show up here.
-                  </p>
-                ) : (
-                  hits.map((h) => (
-                    <button
-                      key={h.id}
-                      className="w-full flex items-center gap-2.5 text-left hover:bg-[var(--paper-2)]"
-                      style={{ padding: "8px 8px", borderRadius: 10 }}
-                      disabled={h.alreadyMember || addingId === h.id}
-                      onClick={async () => {
-                        setAddingId(h.id);
-                        const res = await addMember(courseId, h.id);
-                        setAddingId(null);
-                        if (!res.ok) {
-                          toast(res.error ?? "Something went wrong.", "error");
-                        } else {
-                          toast(
-                            `${h.full_name ?? h.email} added as ${roleLabel(h.account_role).toLowerCase()}`,
-                          );
-                          setQuery("");
-                          setHits([]);
-                        }
-                        router.refresh();
-                      }}
-                    >
-                      <Avatar label={h.full_name ?? h.email} muted />
-                      <span className="min-w-0 flex-1">
-                        <span style={{ fontWeight: 800, fontSize: 14 }} className="block truncate">
-                          {h.full_name ?? h.email}
-                        </span>
-                        <span
-                          style={{ fontSize: 12, color: "var(--ink-soft)" }}
-                          className="block truncate"
-                        >
-                          {[
-                            h.email,
-                            roleLabel(h.account_role),
-                            ...(h.account_role === "student"
-                              ? [h.grade, h.school, h.country].filter(Boolean)
-                              : []),
-                          ].join(" · ")}
-                        </span>
+          <input
+            id="people-search"
+            className="field"
+            placeholder="Search by name or email…"
+            value={query}
+            autoComplete="off"
+            onChange={(e) => {
+              const v = e.target.value;
+              setQuery(v);
+              if (v.trim().length < 2) {
+                setHits([]);
+                setSearching(false);
+              } else {
+                setSearching(true);
+              }
+            }}
+          />
+          {query.trim().length >= 2 && (
+            <div
+              className="scroll-soft"
+              style={{ marginTop: 8, maxHeight: 300, overflowY: "auto" }}
+            >
+              {searching && hits.length === 0 ? (
+                <p style={{ padding: 10, fontSize: 13.5, color: "var(--ink-soft)" }}>
+                  Searching…
+                </p>
+              ) : hits.length === 0 ? (
+                <p style={{ padding: 10, fontSize: 13.5, color: "var(--ink-soft)" }}>
+                  No account matches that yet. New folks can sign up themselves —
+                  once an admin approves them, they&apos;ll show up here.
+                </p>
+              ) : (
+                hits.map((h) => (
+                  <button
+                    key={h.id}
+                    className="w-full flex items-center gap-2.5 text-left hover:bg-[var(--paper-2)]"
+                    style={{ padding: "8px 8px", borderRadius: 10 }}
+                    disabled={h.alreadyMember || h.pending || addingId === h.id}
+                    onClick={async () => {
+                      setAddingId(h.id);
+                      const res = await addMember(courseId, h.id);
+                      setAddingId(null);
+                      if (!res.ok) {
+                        toast(res.error ?? "Something went wrong.", "error");
+                      } else {
+                        toast(
+                          `${h.full_name ?? h.email} added as ${roleLabel(h.account_role).toLowerCase()}`,
+                        );
+                        setQuery("");
+                        setHits([]);
+                      }
+                      router.refresh();
+                    }}
+                  >
+                    <Avatar label={h.full_name ?? h.email} muted />
+                    <span className="min-w-0 flex-1">
+                      <span style={{ fontWeight: 800, fontSize: 14 }} className="block truncate">
+                        {h.full_name ?? h.email}
                       </span>
-                      {h.alreadyMember ? (
-                        <span className="chip">Member</span>
-                      ) : addingId === h.id ? (
-                        <SpinnerIcon width={16} height={16} />
-                      ) : (
-                        <PlusIcon width={17} height={17} style={{ color: "var(--berry-deep)" }} />
-                      )}
-                    </button>
-                  ))
-                )}
-              </div>
-            )}
-          </div>
+                      <span
+                        style={{ fontSize: 12, color: "var(--ink-soft)" }}
+                        className="block truncate"
+                      >
+                        {[
+                          h.email,
+                          roleLabel(h.account_role),
+                          ...(h.account_role === "student"
+                            ? [h.grade, h.school, h.country].filter(Boolean)
+                            : []),
+                        ].join(" · ")}
+                      </span>
+                    </span>
+                    {h.alreadyMember ? (
+                      <span className="chip">Member</span>
+                    ) : h.pending ? (
+                      <span className="chip" title="This account is waiting for admin approval">
+                        Pending
+                      </span>
+                    ) : addingId === h.id ? (
+                      <SpinnerIcon width={16} height={16} />
+                    ) : (
+                      <PlusIcon width={17} height={17} style={{ color: "var(--berry-deep)" }} />
+                    )}
+                  </button>
+                ))
+              )}
+            </div>
+          )}
 
           <label className="label" style={{ marginTop: 16 }}>
             Add a whole group of students

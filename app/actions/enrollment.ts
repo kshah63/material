@@ -163,43 +163,54 @@ export interface PersonHit {
   grade: string | null;
   school: string | null;
   country: string | null;
+  pending: boolean; // account still awaiting admin approval
   alreadyMember: boolean;
 }
 
 /**
- * Find approved accounts by name or email for the roster typeahead. The lookup
- * runs with the service role AFTER verifying the caller manages this course —
- * in_charges can't read arbitrary profiles directly.
+ * Find accounts by name or email for the roster typeahead. The lookup runs with
+ * the service role AFTER verifying the caller manages this course (in_charges
+ * can't read arbitrary profiles directly). Pending accounts are returned too —
+ * flagged — so the manager sees the person exists and just needs approval,
+ * rather than a confusing "no matches".
  */
 export async function searchPeople(courseId: string, query: string) {
   const guard = await canManageCourse(courseId);
   if (!guard.ok) return guard;
 
-  // Strip characters that have meaning in PostgREST or-filters / LIKE patterns.
-  const q = query.trim().replace(/[,()%_]/g, "");
+  // Strip only the LIKE wildcards; run name/email as two plain ilike queries
+  // (more robust than a combined or-filter when the term has @ / . characters).
+  const q = query.trim().replace(/[%_]/g, "");
   if (q.length < 2) return { ok: true as const, results: [] as PersonHit[] };
 
   const admin = createServiceClient();
-  const [{ data: people }, { data: members }] = await Promise.all([
-    admin
-      .from("profiles")
-      .select("id, full_name, email, account_role, grade, school, country")
-      .eq("status", "approved")
-      .or(`full_name.ilike.%${q}%,email.ilike.%${q}%`)
-      .order("full_name", { ascending: true })
-      .limit(8),
-    admin
-      .from("course_memberships")
-      .select("user_id")
-      .eq("course_id", courseId),
+  const cols = "id, full_name, email, account_role, grade, school, country, status";
+  const [byName, byEmail, membersRes] = await Promise.all([
+    admin.from("profiles").select(cols).ilike("full_name", `%${q}%`).limit(8),
+    admin.from("profiles").select(cols).ilike("email", `%${q}%`).limit(8),
+    admin.from("course_memberships").select("user_id").eq("course_id", courseId),
   ]);
 
-  const memberIds = new Set((members ?? []).map((m) => m.user_id));
-  const results: PersonHit[] = (people ?? []).map((p) => ({
-    ...p,
-    account_role: p.account_role === "teacher" ? "teacher" : "student",
-    alreadyMember: memberIds.has(p.id),
-  }));
+  const memberIds = new Set((membersRes.data ?? []).map((m) => m.user_id));
+  type Row = NonNullable<typeof byName.data>[number];
+  const byId = new Map<string, Row>();
+  for (const p of [...(byName.data ?? []), ...(byEmail.data ?? [])]) {
+    byId.set(p.id, p);
+  }
+  const results: PersonHit[] = Array.from(byId.values())
+    .sort((a, b) => (a.full_name ?? a.email).localeCompare(b.full_name ?? b.email))
+    .slice(0, 8)
+    .map((p) => ({
+      id: p.id,
+      full_name: p.full_name,
+      email: p.email,
+      account_role: p.account_role === "teacher" ? "teacher" : "student",
+      grade: p.grade,
+      school: p.school,
+      country: p.country,
+      pending: p.status !== "approved",
+      alreadyMember: memberIds.has(p.id),
+    }));
   return { ok: true as const, results };
 }
 
