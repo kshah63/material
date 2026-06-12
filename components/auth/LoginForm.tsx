@@ -111,6 +111,17 @@ export function LoginForm({ next }: { next: string }) {
 
   return (
     <form onSubmit={onSubmit} className="rise">
+      <header className="mb-6">
+        <h2 style={{ fontSize: 28, marginBottom: 6 }}>
+          {mode === "signup" ? "Create your account" : "Welcome back"}
+        </h2>
+        <p style={{ color: "var(--ink-soft)" }}>
+          {mode === "signup"
+            ? "A few details and you're in — an admin approves new accounts."
+            : "Sign in to reach your courses."}
+        </p>
+      </header>
+
       {mode === "signup" && (
         <>
           <div className="mb-4">

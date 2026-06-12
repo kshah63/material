@@ -67,10 +67,6 @@ export default async function LoginPage({
           <div className="lg:hidden mb-8">
             <Logo />
           </div>
-          <h2 style={{ fontSize: 28, marginBottom: 6 }}>Welcome back</h2>
-          <p style={{ color: "var(--ink-soft)", marginBottom: 24 }}>
-            Sign in to reach your courses.
-          </p>
           {error && (
             <p
               className="mb-4 card"
