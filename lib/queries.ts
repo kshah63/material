@@ -4,8 +4,10 @@ import type {
   Course,
   CourseRole,
   CourseWithRole,
+  EnrollmentRequest,
   FileRow,
   Folder,
+  Profile,
 } from "./types";
 
 /** Courses the caller belongs to (admins see all), with the caller's role. */
@@ -35,6 +37,83 @@ export async function getMyCourses(
     role: roleByCourse.get(c.id) ?? null,
     is_admin_view: isAdmin && !roleByCourse.has(c.id),
   }));
+}
+
+/** The caller's own still-pending join requests (for "Requested" badges). */
+export async function getMyPendingRequests(): Promise<EnrollmentRequest[]> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return [];
+  const { data } = await supabase
+    .from("enrollment_requests")
+    .select("*")
+    .eq("user_id", user.id)
+    .eq("status", "pending");
+  return (data as EnrollmentRequest[]) ?? [];
+}
+
+export interface CoursePerson {
+  membershipId: string;
+  userId: string;
+  role: CourseRole;
+  profile: Profile | null;
+}
+
+export interface CourseJoinRequest extends EnrollmentRequest {
+  profile: Profile | null;
+}
+
+/**
+ * Roster + pending join requests for the People screen. Caller must be admin
+ * or in_charge (RLS returns nothing useful otherwise; the page also guards).
+ */
+export async function getCoursePeople(courseId: string): Promise<{
+  members: CoursePerson[];
+  requests: CourseJoinRequest[];
+}> {
+  const supabase = await createClient();
+
+  const [{ data: memberships }, { data: requests }] = await Promise.all([
+    supabase
+      .from("course_memberships")
+      .select("id, user_id, role")
+      .eq("course_id", courseId)
+      .order("created_at", { ascending: true }),
+    supabase
+      .from("enrollment_requests")
+      .select("*")
+      .eq("course_id", courseId)
+      .eq("status", "pending")
+      .order("created_at", { ascending: true }),
+  ]);
+
+  const ids = new Set<string>();
+  (memberships ?? []).forEach((m) => ids.add(m.user_id));
+  (requests ?? []).forEach((r) => ids.add(r.user_id));
+
+  let profileById = new Map<string, Profile>();
+  if (ids.size > 0) {
+    const { data: profiles } = await supabase
+      .from("profiles")
+      .select("*")
+      .in("id", Array.from(ids));
+    profileById = new Map((profiles ?? []).map((p) => [p.id, p as Profile]));
+  }
+
+  return {
+    members: (memberships ?? []).map((m) => ({
+      membershipId: m.id,
+      userId: m.user_id,
+      role: m.role as CourseRole,
+      profile: profileById.get(m.user_id) ?? null,
+    })),
+    requests: ((requests as EnrollmentRequest[]) ?? []).map((r) => ({
+      ...r,
+      profile: profileById.get(r.user_id) ?? null,
+    })),
+  };
 }
 
 export async function getCourse(courseId: string): Promise<Course | null> {

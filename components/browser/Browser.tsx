@@ -21,6 +21,7 @@ import {
   XIcon,
   ChevronDownIcon,
   PdfIcon,
+  UsersIcon,
 } from "@/components/icons";
 import {
   createFolder,
@@ -99,11 +100,12 @@ export function Browser(props: BrowserProps) {
 
   const refresh = useCallback(() => router.refresh(), [router]);
 
-  const uploader = useUploader(courseId, folderId, ({ done, failed, skipped }) => {
+  const uploader = useUploader(courseId, folderId, ({ done, failed, skipped, canceled }) => {
     refresh();
     const bits: string[] = [];
     if (done) bits.push(`${done} uploaded`);
     if (failed) bits.push(`${failed} failed`);
+    if (canceled) bits.push(`${canceled} canceled`);
     if (skipped) bits.push(`${skipped} non-PDF skipped`);
     if (bits.length) toast(bits.join(" · "), failed ? "error" : "success");
   });
@@ -241,12 +243,20 @@ export function Browser(props: BrowserProps) {
         <div className="flex items-start justify-between gap-4 mb-2">
           <Breadcrumb courseId={courseId} courseName={courseName} crumbs={breadcrumb} />
           {caps.canManage && (
-            <Link
-              href={`/courses/${courseId}/trash`}
-              className="btn btn-quiet btn-sm shrink-0"
-            >
-              <TrashIcon width={16} height={16} /> Trash
-            </Link>
+            <div className="flex items-center gap-1 shrink-0">
+              <Link
+                href={`/courses/${courseId}/people`}
+                className="btn btn-quiet btn-sm"
+              >
+                <UsersIcon width={16} height={16} /> People
+              </Link>
+              <Link
+                href={`/courses/${courseId}/trash`}
+                className="btn btn-quiet btn-sm"
+              >
+                <TrashIcon width={16} height={16} /> Trash
+              </Link>
+            </div>
           )}
         </div>
 
@@ -483,7 +493,12 @@ export function Browser(props: BrowserProps) {
         onConfirm={doDelete}
       />
 
-      <UploadTray items={uploader.items} active={uploader.active} onDismiss={uploader.dismiss} />
+      <UploadTray
+        items={uploader.items}
+        active={uploader.active}
+        onCancel={uploader.cancel}
+        onDismiss={uploader.dismiss}
+      />
 
       {viewing && <Viewer key={viewing.id} file={viewing} onClose={() => setViewing(null)} />}
     </div>

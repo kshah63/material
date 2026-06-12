@@ -1,4 +1,4 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { requireProfile } from "@/lib/auth";
 import {
   getCourse,
@@ -30,6 +30,9 @@ export default async function CoursePage({
   if (!course) notFound(); // RLS hides courses you don't belong to
 
   const role = await getCourseRole(courseId);
+  // The directory policy lets non-members see the course exists (to request
+  // joining) — but only members and admins get inside.
+  if (!role && !isAdmin) redirect("/courses");
   const caps = capabilitiesFor(role, isAdmin);
 
   const [{ folders, files }, breadcrumb, allFolders] = await Promise.all([

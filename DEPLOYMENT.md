@@ -37,7 +37,14 @@ supabase db push          # applies supabase/migrations/* in order
 ```
 
 Verify: **Table editor** shows `profiles`, `courses`, `course_memberships`,
-`folders`, `files`; **Storage** shows a private `course-materials` bucket.
+`enrollment_requests`, `folders`, `files`; **Storage** shows a private
+`course-materials` bucket.
+
+**Already deployed before accounts & enrollment existed?** Run just the newest
+migration —
+[`supabase/migrations/20260612000006_accounts_enrollment.sql`](./supabase/migrations/20260612000006_accounts_enrollment.sql)
+— in the SQL editor. It's idempotent and backfills every existing profile as
+`approved`.
 
 ---
 
@@ -50,10 +57,11 @@ Verify: **Table editor** shows `profiles`, `courses`, `course_memberships`,
   - `https://<your-app>/auth/callback`
   - `http://localhost:3000/auth/callback`
 
-**Authentication → Providers → Email:** keep **Email** enabled. The app supports
-both password sign-in and magic links. This is a standalone roster, so you may
-**disable public sign-ups** (Providers → Email → "Allow new users to sign up")
-once your admins exist — people get in by invitation.
+**Authentication → Providers → Email:** keep **Email** enabled, and keep
+**"Allow new users to sign up" ON** — the portal has a self-signup flow where
+people register as a student or teacher and then wait for an admin to approve
+the account. (Admin invites skip the approval queue.) If "Confirm email" is on
+— the default — signups verify their address before they can sign in.
 
 **Email delivery (for invites & magic links):** Supabase's built-in email works
 for testing but is heavily rate-limited. For production, set up custom SMTP under

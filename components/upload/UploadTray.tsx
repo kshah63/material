@@ -14,10 +14,12 @@ import type { UploadItem } from "@/hooks/useUploader";
 export function UploadTray({
   items,
   active,
+  onCancel,
   onDismiss,
 }: {
   items: UploadItem[];
   active: boolean;
+  onCancel: () => void;
   onDismiss: () => void;
 }) {
   const [collapsed, setCollapsed] = useState(false);
@@ -26,12 +28,13 @@ export function UploadTray({
     const total = items.length;
     const done = items.filter((i) => i.status === "done").length;
     const failed = items.filter((i) => i.status === "error").length;
+    const canceled = items.filter((i) => i.status === "canceled").length;
     const bytesTotal = items.reduce((s, i) => s + i.size, 0);
     const bytesSent = items.reduce(
       (s, i) => s + (i.status === "done" ? i.size : i.sent),
       0,
     );
-    return { total, done, failed, bytesTotal, bytesSent };
+    return { total, done, failed, canceled, bytesTotal, bytesSent };
   }, [items]);
 
   if (items.length === 0) return null;
@@ -73,7 +76,9 @@ export function UploadTray({
                 ? `Uploading ${agg.done}/${agg.total}`
                 : agg.failed > 0
                   ? `${agg.done} done · ${agg.failed} failed`
-                  : `Uploaded ${agg.done} file${agg.done === 1 ? "" : "s"}`}
+                  : agg.canceled > 0
+                    ? `${agg.done} done · ${agg.canceled} canceled`
+                    : `Uploaded ${agg.done} file${agg.done === 1 ? "" : "s"}`}
             </p>
             <p className="mono" style={{ fontSize: 11, color: "var(--ink-soft)" }}>
               {formatBytes(agg.bytesSent)} / {formatBytes(agg.bytesTotal)}
@@ -81,6 +86,15 @@ export function UploadTray({
           </div>
         </div>
         <div className="flex items-center gap-1">
+          {active && (
+            <button
+              className="btn btn-quiet btn-sm"
+              style={{ color: "var(--berry-deep)" }}
+              onClick={onCancel}
+            >
+              Cancel
+            </button>
+          )}
           <button
             className="btn btn-quiet"
             style={{ padding: 5 }}
@@ -145,9 +159,11 @@ export function UploadTray({
                       ? "done"
                       : item.status === "error"
                         ? "failed"
-                        : item.status === "uploading"
-                          ? `${item.size ? Math.round((item.sent / item.size) * 100) : 0}%`
-                          : "queued"}
+                        : item.status === "canceled"
+                          ? "canceled"
+                          : item.status === "uploading"
+                            ? `${item.size ? Math.round((item.sent / item.size) * 100) : 0}%`
+                            : "queued"}
                   </span>
                 </div>
                 <div style={{ height: 3, marginTop: 4, background: "var(--paper-2)", borderRadius: 999 }}>

@@ -4,8 +4,9 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { SpinnerIcon, MarkerIcon } from "@/components/icons";
+import type { AccountRole } from "@/lib/types";
 
-type Mode = "password" | "magic";
+type Mode = "password" | "magic" | "signup";
 
 export function LoginForm({ next }: { next: string }) {
   const router = useRouter();
@@ -13,9 +14,11 @@ export function LoginForm({ next }: { next: string }) {
   const [mode, setMode] = useState<Mode>("password");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [fullName, setFullName] = useState("");
+  const [accountRole, setAccountRole] = useState<AccountRole>("student");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [sent, setSent] = useState(false);
+  const [sent, setSent] = useState<string | null>(null);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -30,6 +33,28 @@ export function LoginForm({ next }: { next: string }) {
         if (error) throw error;
         router.push(next);
         router.refresh();
+      } else if (mode === "signup") {
+        if (!fullName.trim()) throw new Error("Please enter your name.");
+        const { data, error } = await supabase.auth.signUp({
+          email: email.trim(),
+          password,
+          options: {
+            // handle_new_user reads these into the profiles row.
+            data: { full_name: fullName.trim(), account_role: accountRole },
+            emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
+          },
+        });
+        if (error) throw error;
+        if (data.session) {
+          // Email confirmation is off — straight in (they'll see the
+          // waiting-for-approval screen until an admin approves).
+          router.push(next);
+          router.refresh();
+        } else {
+          setSent(
+            "We sent a confirmation link to verify your email. After that, an admin will approve your account.",
+          );
+        }
       } else {
         const { error } = await supabase.auth.signInWithOtp({
           email: email.trim(),
@@ -38,7 +63,7 @@ export function LoginForm({ next }: { next: string }) {
           },
         });
         if (error) throw error;
-        setSent(true);
+        setSent("We sent a sign-in link. Open it on this device to continue.");
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
@@ -58,17 +83,16 @@ export function LoginForm({ next }: { next: string }) {
         </div>
         <h2 style={{ fontSize: 22 }}>Check your inbox</h2>
         <p style={{ color: "var(--ink-soft)", marginTop: 8 }}>
-          We sent a sign-in link to <strong>{email}</strong>. Open it on this
-          device to continue.
+          <strong>{email}</strong> — {sent}
         </p>
         <button
           className="btn btn-quiet mt-4"
           onClick={() => {
-            setSent(false);
+            setSent(null);
             setMode("password");
           }}
         >
-          Use a password instead
+          Back to sign in
         </button>
       </div>
     );
@@ -76,6 +100,51 @@ export function LoginForm({ next }: { next: string }) {
 
   return (
     <form onSubmit={onSubmit} className="rise">
+      {mode === "signup" && (
+        <>
+          <div className="mb-4">
+            <label className="label" htmlFor="fullName">
+              Your name
+            </label>
+            <input
+              id="fullName"
+              required
+              autoComplete="name"
+              className="field"
+              placeholder="Jordan Lee"
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
+            />
+          </div>
+
+          <div className="mb-4">
+            <span className="label">I&apos;m joining as a…</span>
+            <div className="flex gap-2">
+              {(["student", "teacher"] as const).map((r) => (
+                <button
+                  key={r}
+                  type="button"
+                  onClick={() => setAccountRole(r)}
+                  className="flex-1"
+                  style={{
+                    padding: "10px 12px",
+                    borderRadius: 12,
+                    fontWeight: 800,
+                    fontSize: 14,
+                    border: `2px solid ${accountRole === r ? "var(--berry)" : "var(--line)"}`,
+                    background: accountRole === r ? "var(--berry-tint, rgba(232,92,106,0.08))" : "transparent",
+                    color: accountRole === r ? "var(--berry-deep)" : "var(--ink-soft)",
+                    transition: "border-color .12s ease, color .12s ease",
+                  }}
+                >
+                  {r === "student" ? "Student" : "Teacher"}
+                </button>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+
       <div className="mb-4">
         <label className="label" htmlFor="email">
           Email
@@ -92,7 +161,7 @@ export function LoginForm({ next }: { next: string }) {
         />
       </div>
 
-      {mode === "password" && (
+      {mode !== "magic" && (
         <div className="mb-4">
           <label className="label" htmlFor="password">
             Password
@@ -101,7 +170,7 @@ export function LoginForm({ next }: { next: string }) {
             id="password"
             type="password"
             required
-            autoComplete="current-password"
+            autoComplete={mode === "signup" ? "new-password" : "current-password"}
             className="field"
             placeholder="••••••••"
             value={password}
@@ -125,23 +194,64 @@ export function LoginForm({ next }: { next: string }) {
           <SpinnerIcon />
         ) : mode === "password" ? (
           "Sign in"
+        ) : mode === "signup" ? (
+          "Create account"
         ) : (
           "Email me a sign-in link"
         )}
       </button>
 
-      <button
-        type="button"
-        className="btn btn-quiet w-full justify-center mt-2"
-        onClick={() => {
-          setError(null);
-          setMode(mode === "password" ? "magic" : "password");
-        }}
+      {mode !== "signup" && (
+        <button
+          type="button"
+          className="btn btn-quiet w-full justify-center mt-2"
+          onClick={() => {
+            setError(null);
+            setMode(mode === "password" ? "magic" : "password");
+          }}
+        >
+          {mode === "password"
+            ? "No password? Email me a link instead"
+            : "Sign in with a password"}
+        </button>
+      )}
+
+      <p
+        className="text-center mt-4"
+        style={{ fontSize: 13.5, color: "var(--ink-soft)", fontWeight: 600 }}
       >
-        {mode === "password"
-          ? "No password? Email me a link instead"
-          : "Sign in with a password"}
-      </button>
+        {mode === "signup" ? (
+          <>
+            Already have an account?{" "}
+            <button
+              type="button"
+              className="underline"
+              style={{ fontWeight: 800, color: "var(--berry-deep)" }}
+              onClick={() => {
+                setError(null);
+                setMode("password");
+              }}
+            >
+              Sign in
+            </button>
+          </>
+        ) : (
+          <>
+            New here?{" "}
+            <button
+              type="button"
+              className="underline"
+              style={{ fontWeight: 800, color: "var(--berry-deep)" }}
+              onClick={() => {
+                setError(null);
+                setMode("signup");
+              }}
+            >
+              Create an account
+            </button>
+          </>
+        )}
+      </p>
     </form>
   );
 }

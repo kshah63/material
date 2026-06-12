@@ -24,6 +24,8 @@ export async function requireProfile(): Promise<Profile> {
       email: user.email ?? "",
       full_name: (user.user_metadata?.full_name as string) ?? null,
       app_role: "member" as const,
+      account_role: "student" as const,
+      status: "approved" as const,
       created_at: new Date().toISOString(),
     }
   );

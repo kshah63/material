@@ -3,12 +3,16 @@
 
 export type AppRole = "admin" | "member";
 export type CourseRole = "student" | "teacher" | "in_charge";
+export type AccountRole = "student" | "teacher";
+export type AccountStatus = "pending" | "approved";
 
 export interface Profile {
   id: string;
   email: string;
   full_name: string | null;
   app_role: AppRole;
+  account_role: AccountRole;
+  status: AccountStatus;
   created_at: string;
 }
 
@@ -28,6 +32,17 @@ export interface CourseMembership {
   user_id: string;
   role: CourseRole;
   created_at: string;
+}
+
+export interface EnrollmentRequest {
+  id: string;
+  course_id: string;
+  user_id: string;
+  requested_role: AccountRole;
+  status: "pending" | "approved" | "declined";
+  created_at: string;
+  decided_at: string | null;
+  decided_by: string | null;
 }
 
 export interface Folder {

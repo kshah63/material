@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { requireProfile } from "@/lib/auth";
-import { getMyCourses } from "@/lib/queries";
+import { getMyCourses, getMyPendingRequests } from "@/lib/queries";
 import { roleLabel } from "@/lib/format";
 import { BookIcon, ChevronRightIcon, ShieldIcon } from "@/components/icons";
+import { JoinCourseCard } from "@/components/courses/JoinCourseCard";
 import type { CourseWithRole } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -77,9 +78,20 @@ function CourseCard({ course }: { course: CourseWithRole }) {
 export default async function CoursesPage() {
   const profile = await requireProfile();
   const isAdmin = profile.app_role === "admin";
-  const courses = await getMyCourses(isAdmin);
-  const active = courses.filter((c) => !c.archived_at);
-  const archived = courses.filter((c) => c.archived_at);
+  const [courses, pendingRequests] = await Promise.all([
+    getMyCourses(isAdmin),
+    getMyPendingRequests(),
+  ]);
+  const requestByCourse = new Map(pendingRequests.map((r) => [r.course_id, r.id]));
+
+  // The directory policy surfaces every live course; split "mine" from
+  // "joinable" (admins see everything as theirs, so joinable stays empty).
+  const enrolled = courses.filter((c) => c.role || c.is_admin_view);
+  const joinable = courses.filter(
+    (c) => !c.role && !c.is_admin_view && !c.archived_at,
+  );
+  const active = enrolled.filter((c) => !c.archived_at);
+  const archived = enrolled.filter((c) => c.archived_at);
 
   return (
     <div style={{ maxWidth: 1080, margin: "0 auto", padding: "40px 28px 80px" }}>
@@ -122,7 +134,9 @@ export default async function CoursesPage() {
           <p style={{ color: "var(--ink-soft)", marginTop: 6, maxWidth: 360 }}>
             {isAdmin
               ? "Create a course and add members from the admin console."
-              : "When a teacher adds you to a course, it’ll appear right here."}
+              : joinable.length > 0
+                ? "Request to join a course below, or ask a teacher to add you."
+                : "When a teacher adds you to a course, it’ll appear right here."}
           </p>
           {isAdmin && (
             <Link href="/admin" className="btn btn-primary mt-5">
@@ -139,6 +153,29 @@ export default async function CoursesPage() {
             <CourseCard key={c.id} course={c} />
           ))}
         </div>
+      )}
+
+      {joinable.length > 0 && (
+        <section className="mt-12">
+          <h2
+            className="mono"
+            style={{ fontSize: 12, letterSpacing: "0.1em", color: "var(--ink-faint)", marginBottom: 14 }}
+          >
+            JOIN A COURSE
+          </h2>
+          <div
+            className="grid gap-4"
+            style={{ gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))" }}
+          >
+            {joinable.map((c) => (
+              <JoinCourseCard
+                key={c.id}
+                course={c}
+                pendingRequestId={requestByCourse.get(c.id) ?? null}
+              />
+            ))}
+          </div>
+        </section>
       )}
 
       {archived.length > 0 && (

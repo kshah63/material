@@ -102,12 +102,47 @@ export async function removeMembership(courseId: string, userId: string) {
 }
 
 // --- Users / provisioning ----------------------------------------------------
+// profiles column privileges only let `authenticated` write full_name, so all
+// role/status changes run through the service role behind assertAdmin.
 
 export async function setAppRole(userId: string, appRole: "admin" | "member") {
-  const supabase = await createClient();
-  const { error } = await supabase
+  const guard = await assertAdmin();
+  if (!guard.ok) return guard;
+  const admin = createServiceClient();
+  const { error } = await admin
     .from("profiles")
     .update({ app_role: appRole })
+    .eq("id", userId);
+  if (error) return { ok: false as const, error: error.message };
+  revalidatePath("/admin");
+  return { ok: true as const };
+}
+
+/** Approve a self-signup so the person can use the portal (§ accounts). */
+export async function approveAccount(userId: string) {
+  const guard = await assertAdmin();
+  if (!guard.ok) return guard;
+  const admin = createServiceClient();
+  const { error } = await admin
+    .from("profiles")
+    .update({ status: "approved" })
+    .eq("id", userId);
+  if (error) return { ok: false as const, error: error.message };
+  revalidatePath("/admin");
+  return { ok: true as const };
+}
+
+/** Fix a mis-registered account type (student <-> teacher). */
+export async function setAccountRole(
+  userId: string,
+  accountRole: "student" | "teacher",
+) {
+  const guard = await assertAdmin();
+  if (!guard.ok) return guard;
+  const admin = createServiceClient();
+  const { error } = await admin
+    .from("profiles")
+    .update({ account_role: accountRole })
     .eq("id", userId);
   if (error) return { ok: false as const, error: error.message };
   revalidatePath("/admin");
@@ -123,6 +158,7 @@ export async function setAppRole(userId: string, appRole: "admin" | "member") {
 export async function inviteUser(input: {
   email: string;
   fullName?: string;
+  accountRole?: "student" | "teacher";
   courseId?: string;
   role?: CourseRole;
 }) {
@@ -137,7 +173,12 @@ export async function inviteUser(input: {
 
   const { data: invited, error: inviteErr } =
     await admin.auth.admin.inviteUserByEmail(email, {
-      data: input.fullName ? { full_name: input.fullName } : undefined,
+      data: {
+        // invited:true tells handle_new_user to skip the approval queue.
+        invited: true,
+        account_role: input.accountRole ?? "student",
+        ...(input.fullName ? { full_name: input.fullName } : {}),
+      },
       redirectTo,
     });
 
@@ -153,6 +194,8 @@ export async function inviteUser(input: {
       .maybeSingle();
     if (!existing) return { ok: false as const, error: inviteErr.message };
     userId = existing.id;
+    // An admin re-inviting an existing pending account counts as approval.
+    await admin.from("profiles").update({ status: "approved" }).eq("id", userId);
   }
 
   if (userId && input.fullName) {

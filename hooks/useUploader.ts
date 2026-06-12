@@ -11,7 +11,8 @@ export type UploadStatus =
   | "pending"
   | "uploading"
   | "done"
-  | "error";
+  | "error"
+  | "canceled";
 
 export interface UploadItem {
   key: string;
@@ -27,6 +28,7 @@ export interface UploaderState {
   items: UploadItem[];
   active: boolean;
   start: (picked: PickedFile[], existingNames: string[]) => Promise<void>;
+  cancel: () => void;
   dismiss: () => void;
   retryFailed: () => void;
 }
@@ -36,12 +38,18 @@ const CONCURRENCY = 4;
 export function useUploader(
   courseId: string,
   folderId: string | null,
-  onComplete: (summary: { done: number; failed: number; skipped: number }) => void,
+  onComplete: (summary: {
+    done: number;
+    failed: number;
+    skipped: number;
+    canceled: number;
+  }) => void,
 ): UploaderState {
   const [items, setItems] = useState<UploadItem[]>([]);
   const [active, setActive] = useState(false);
   const itemsRef = useRef<Map<string, UploadItem>>(new Map());
   const lastRun = useRef<{ picked: PickedFile[]; existing: string[] } | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   const sync = useCallback(() => {
     setItems(Array.from(itemsRef.current.values()));
@@ -64,10 +72,12 @@ export function useUploader(
       const skipped = plan.skippedNonPdf;
 
       if (plan.files.length === 0) {
-        onComplete({ done: 0, failed: 0, skipped });
+        onComplete({ done: 0, failed: 0, skipped, canceled: 0 });
         return;
       }
 
+      const controller = new AbortController();
+      abortRef.current = controller;
       setActive(true);
 
       // Build the upload items with keep-both name de-duplication, scoped per
@@ -108,7 +118,7 @@ export function useUploader(
             update(p.key, { status: "error", error: res.error }),
           );
           setActive(false);
-          onComplete({ done: 0, failed: planned.length, skipped });
+          onComplete({ done: 0, failed: planned.length, skipped, canceled: 0 });
           return;
         }
         dirMap = res.map;
@@ -118,9 +128,11 @@ export function useUploader(
       let cursor = 0;
       let done = 0;
       let failed = 0;
+      let canceled = 0;
 
       const worker = async () => {
         while (cursor < planned.length) {
+          if (controller.signal.aborted) return;
           const p = planned[cursor++];
           const destFolder =
             p.relativeDir === "" ? folderId : (dirMap[p.relativeDir] ?? folderId);
@@ -132,6 +144,7 @@ export function useUploader(
             await resumableUpload({
               file: p.file,
               objectName,
+              signal: controller.signal,
               onProgress: (sent) => update(p.key, { sent }),
             });
             const reg = await registerFile({
@@ -146,11 +159,16 @@ export function useUploader(
             update(p.key, { status: "done", sent: p.file.size });
             done++;
           } catch (err) {
-            update(p.key, {
-              status: "error",
-              error: err instanceof Error ? err.message : "Upload failed",
-            });
-            failed++;
+            if (err instanceof DOMException && err.name === "AbortError") {
+              update(p.key, { status: "canceled" });
+              canceled++;
+            } else {
+              update(p.key, {
+                status: "error",
+                error: err instanceof Error ? err.message : "Upload failed",
+              });
+              failed++;
+            }
           }
         }
       };
@@ -159,11 +177,25 @@ export function useUploader(
         Array.from({ length: Math.min(CONCURRENCY, planned.length) }, worker),
       );
 
+      // Queued files the workers never reached after a cancel.
+      if (controller.signal.aborted) {
+        itemsRef.current.forEach((item, key) => {
+          if (item.status === "pending" || item.status === "uploading") {
+            update(key, { status: "canceled" });
+            canceled++;
+          }
+        });
+      }
+
       setActive(false);
-      onComplete({ done, failed, skipped });
+      onComplete({ done, failed, skipped, canceled });
     },
     [courseId, folderId, onComplete, sync, update],
   );
+
+  const cancel = useCallback(() => {
+    abortRef.current?.abort();
+  }, []);
 
   const dismiss = useCallback(() => {
     itemsRef.current = new Map();
@@ -174,5 +206,5 @@ export function useUploader(
     if (lastRun.current) void run(lastRun.current.picked, lastRun.current.existing);
   }, [run]);
 
-  return { items, active, start: run, dismiss, retryFailed };
+  return { items, active, start: run, cancel, dismiss, retryFailed };
 }

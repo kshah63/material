@@ -21,9 +21,11 @@ import {
   setMembership,
   removeMembership,
   setAppRole,
+  setAccountRole,
+  approveAccount,
   inviteUser,
 } from "@/app/actions/admin";
-import type { Course, CourseRole, Profile } from "@/lib/types";
+import type { AccountRole, Course, CourseRole, Profile } from "@/lib/types";
 
 interface Membership {
   id: string;
@@ -64,6 +66,19 @@ export function AdminConsole({
     memberships.forEach((x) => m.set(x.course_id, (m.get(x.course_id) ?? 0) + 1));
     return m;
   }, [memberships]);
+
+  // Accounts awaiting approval float to the top of the People tab.
+  const sortedProfiles = useMemo(
+    () =>
+      [...profiles].sort((a, b) =>
+        a.status === b.status ? 0 : a.status === "pending" ? -1 : 1,
+      ),
+    [profiles],
+  );
+  const pendingCount = useMemo(
+    () => profiles.filter((p) => p.status === "pending").length,
+    [profiles],
+  );
 
   async function act<T extends { ok: boolean; error?: string }>(
     p: Promise<T>,
@@ -178,6 +193,7 @@ export function AdminConsole({
           <div className="flex justify-between items-center mb-4">
             <p style={{ color: "var(--ink-soft)", fontSize: 14 }}>
               {profiles.length} {profiles.length === 1 ? "person" : "people"}
+              {pendingCount > 0 && ` · ${pendingCount} awaiting approval`}
             </p>
             <button className="btn btn-primary btn-sm" onClick={() => setInviteOpen(true)}>
               <PlusIcon width={17} height={17} /> Invite person
@@ -185,15 +201,18 @@ export function AdminConsole({
           </div>
 
           <div className="flex flex-col gap-2">
-            {profiles.map((p) => (
+            {sortedProfiles.map((p) => (
               <div key={p.id} className="card flex items-center gap-3" style={{ padding: 14 }}>
                 <span
                   className="grid place-items-center rounded-full shrink-0"
                   style={{
                     width: 38,
                     height: 38,
-                    background: "linear-gradient(150deg, var(--grape), var(--berry))",
-                    color: "#fff",
+                    background:
+                      p.status === "pending"
+                        ? "var(--paper-2)"
+                        : "linear-gradient(150deg, var(--grape), var(--berry))",
+                    color: p.status === "pending" ? "var(--ink-soft)" : "#fff",
                     fontWeight: 800,
                   }}
                 >
@@ -204,13 +223,22 @@ export function AdminConsole({
                     {p.full_name ?? p.email.split("@")[0]}
                   </span>
                   <span style={{ fontSize: 12.5, color: "var(--ink-soft)" }} className="block truncate">
-                    {p.email}
+                    {p.email} · {roleLabel(p.account_role)}
                   </span>
                 </div>
-                {p.app_role === "admin" && (
-                  <span className="chip chip-role">
-                    <ShieldIcon width={12} height={12} /> Admin
-                  </span>
+                {p.status === "pending" ? (
+                  <button
+                    className="btn btn-primary btn-sm"
+                    onClick={() => act(approveAccount(p.id), "Account approved")}
+                  >
+                    <CheckIcon width={15} height={15} /> Approve
+                  </button>
+                ) : (
+                  p.app_role === "admin" && (
+                    <span className="chip chip-role">
+                      <ShieldIcon width={12} height={12} /> Admin
+                    </span>
+                  )
                 )}
                 <Menu
                   align="right"
@@ -223,6 +251,9 @@ export function AdminConsole({
                     p.app_role === "admin"
                       ? { label: "Revoke admin", onSelect: () => act(setAppRole(p.id, "member"), "Updated") }
                       : { label: "Make admin", icon: <ShieldIcon width={16} height={16} />, onSelect: () => act(setAppRole(p.id, "admin"), "Updated") },
+                    p.account_role === "teacher"
+                      ? { label: "Switch to student account", onSelect: () => act(setAccountRole(p.id, "student"), "Updated") }
+                      : { label: "Switch to teacher account", onSelect: () => act(setAccountRole(p.id, "teacher"), "Updated") },
                   ]}
                 />
               </div>
@@ -325,10 +356,17 @@ function InviteModal({
 }: {
   courses: Course[];
   onClose: () => void;
-  onInvite: (input: { email: string; fullName?: string; courseId?: string; role?: CourseRole }) => Promise<void>;
+  onInvite: (input: {
+    email: string;
+    fullName?: string;
+    accountRole?: AccountRole;
+    courseId?: string;
+    role?: CourseRole;
+  }) => Promise<void>;
 }) {
   const [email, setEmail] = useState("");
   const [fullName, setFullName] = useState("");
+  const [accountRole, setAccountRole] = useState<AccountRole>("student");
   const [courseId, setCourseId] = useState("");
   const [role, setRole] = useState<CourseRole>("student");
   const [busy, setBusy] = useState(false);
@@ -344,6 +382,7 @@ function InviteModal({
           await onInvite({
             email,
             fullName: fullName || undefined,
+            accountRole,
             courseId: courseId || undefined,
             role: courseId ? role : undefined,
           });
@@ -357,6 +396,16 @@ function InviteModal({
           Full name <span style={{ color: "var(--ink-faint)", fontWeight: 600 }}>(optional)</span>
         </label>
         <input className="field" value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="Jordan Lee" />
+
+        <label className="label" style={{ marginTop: 14 }}>Account type</label>
+        <select
+          className="field"
+          value={accountRole}
+          onChange={(e) => setAccountRole(e.target.value as AccountRole)}
+        >
+          <option value="student">Student</option>
+          <option value="teacher">Teacher</option>
+        </select>
 
         <label className="label" style={{ marginTop: 14 }}>
           Add to a course <span style={{ color: "var(--ink-faint)", fontWeight: 600 }}>(optional)</span>
