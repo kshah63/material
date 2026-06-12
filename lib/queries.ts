@@ -15,6 +15,9 @@ export async function getMyCourses(
   isAdmin: boolean,
 ): Promise<CourseWithRole[]> {
   const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
   const { data: courses } = await supabase
     .from("courses")
@@ -23,9 +26,12 @@ export async function getMyCourses(
 
   if (!courses) return [];
 
+  // Filter to the caller's OWN rows — admins and in_charges can see other
+  // people's memberships too, and those must not masquerade as the caller's role.
   const { data: memberships } = await supabase
     .from("course_memberships")
-    .select("course_id, role");
+    .select("course_id, role")
+    .eq("user_id", user?.id ?? "");
 
   const roleByCourse = new Map<string, CourseRole>();
   (memberships ?? []).forEach((m) =>
