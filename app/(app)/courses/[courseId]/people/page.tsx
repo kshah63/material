@@ -2,6 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import { requireProfile } from "@/lib/auth";
 import { getCourse, getCourseRole, getCoursePeople } from "@/lib/queries";
 import { createServiceClient } from "@/lib/supabase/service";
+import { GRADES, SCHOOLS, SCHOOL_SET } from "@/lib/options";
 import { PeopleManager } from "@/components/people/PeopleManager";
 
 export const dynamic = "force-dynamic";
@@ -24,19 +25,27 @@ export default async function CoursePeoplePage({
 
   const { members, requests } = await getCoursePeople(courseId);
 
-  // Grade/school choices for the bulk-add picker. Service role (we just
-  // verified the caller manages this course): distinct values across all
-  // approved students, not only ones the caller could read via RLS.
+  // Bulk-add picker options: always offer the full canonical grade/school
+  // lists (so a specific grade/school can be chosen even before any student
+  // has that value), then append any real student values not on the lists
+  // (free-text "Other", legacy, or global schools).
   const admin = createServiceClient();
   const { data: students } = await admin
     .from("profiles")
     .select("grade, school")
     .eq("status", "approved")
     .eq("account_role", "student");
-  const distinct = (key: "grade" | "school") =>
+
+  const GRADE_SET = new Set<string>(GRADES);
+  const extra = (key: "grade" | "school", known: ReadonlySet<string>) =>
     Array.from(
       new Set((students ?? []).map((s) => s[key]).filter((v): v is string => Boolean(v))),
-    ).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    )
+      .filter((v) => !known.has(v))
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+
+  const gradeOptions = [...GRADES, ...extra("grade", GRADE_SET)];
+  const schoolOptions = [...SCHOOLS, ...extra("school", SCHOOL_SET)];
 
   return (
     <PeopleManager
@@ -46,8 +55,8 @@ export default async function CoursePeoplePage({
       selfId={profile.id}
       members={members}
       requests={requests}
-      gradeOptions={distinct("grade")}
-      schoolOptions={distinct("school")}
+      gradeOptions={gradeOptions}
+      schoolOptions={schoolOptions}
     />
   );
 }
