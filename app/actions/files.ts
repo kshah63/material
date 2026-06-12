@@ -48,7 +48,12 @@ export async function createSignedUpload(storagePath: string) {
   if (error || !data) {
     return { ok: false as const, error: error?.message ?? "Could not start upload." };
   }
-  return { ok: true as const, path: data.path, token: data.token };
+  return {
+    ok: true as const,
+    signedUrl: data.signedUrl,
+    path: data.path,
+    token: data.token,
+  };
 }
 
 interface RegisterFileInput {
