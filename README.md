@@ -49,6 +49,53 @@ deletes.
 | Uploads | `hooks/useUploader.ts` + `lib/upload/*` | Reconstructs the dropped folder tree, creates folders once, uploads bytes resumably (TUS, 4-wide pool), registers each `files` row only after its bytes commit. |
 | Soft delete / restore | `soft_delete_*` / `restore_batch` RPCs | One `delete_batch_id` per operation so a folder + its contents restore as one unit. |
 | Purge | `app/api/cron/purge` (Vercel Cron) or `supabase/functions/purge` (Edge) | Object first, then row. Service role only. |
+| Read API | `app/api/v1/*` + `lib/api/auth.ts` | Server-to-server JSON for the lessons platform: shared key + stated acting role, service-role queries, role matrix applied in the handler. See § Read API. |
+
+---
+
+## Read API (server-to-server)
+
+A small JSON API under `/api/v1` lets another trusted backend (the lessons
+platform) list a course's material and open files **without a user session**.
+Every route runs as the service role, so the caller is trusted to state the
+acting user's course role, and the handlers apply the permission matrix
+themselves. Read-only; Trash is never exposed.
+
+**Headers** (every request):
+
+| Header | Value |
+|---|---|
+| `Authorization` | `Bearer <MATERIALS_API_KEY>` — 401 if the env var is unset or the key doesn't match |
+| `X-Acting-Role` | `student` · `teacher` · `in_charge` · `admin` (default `student`; anything else → 400) |
+| `X-Acting-Email` | optional, informational only — not used for authorization |
+
+**Role semantics** mirror RLS: `student` never sees teacher-only material
+(`eff_teacher_only`, i.e. the inherited flag); every other role sees everything.
+
+**Endpoints**
+
+- `GET /api/v1/courses` → `{ courses: [{ id, name, code, archived }] }`,
+  non-archived first.
+- `GET /api/v1/courses/{courseId}/tree?role=student|teacher` →
+  `{ course: { id, name, code }, root }` where
+  `root = { id: null, name, folders: Folder[], files: File[] }`,
+  `Folder = { id, name, folders, files }` and
+  `File = { id, name, size_bytes, mime_type, teacher_only, created_at }`.
+  `?role=` is an alias for `X-Acting-Role` (if both are sent they must agree).
+  For `student`, a teacher-only folder is pruned together with everything
+  beneath it. 404 for an unknown course.
+- `POST /api/v1/files/{fileId}/view-url` → `{ url, name, expires_in: 60 }` —
+  a 60-second signed URL for viewing, minted the same way as `getViewUrl()`
+  (no download variant). 404 if the file is missing or in Trash; 403 if it is
+  teacher-only and the acting role is `student`.
+
+Errors are `{ error: string }` with the matching status. Responses are never
+cached (`force-dynamic`, and `Cache-Control: no-store` on signed URLs).
+
+`MATERIALS_API_KEY` is **server-to-server only**: it bypasses RLS, so it must
+live only in the calling backend's environment — never in a browser or mobile
+app. The proxy skips `/api/v1/*` entirely, so these routes never touch session
+cookies or redirect to `/login`.
 
 ---
 
@@ -61,6 +108,7 @@ app/
     admin/                admin console (courses, people, invites)
   actions/                server actions = the API surface (§8)
   api/cron/purge/         30-day purge route (Vercel Cron)
+  api/v1/                 server-to-server read API (lessons platform)
   auth/callback/          magic-link / invite landing
   login/                  auth screen
 components/               UI: AppShell, browser/, upload/, admin/, ui/, icons/
