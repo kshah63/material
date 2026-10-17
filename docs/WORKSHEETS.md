@@ -173,17 +173,21 @@ The owner (Kartik) answered the plan's five open questions later on
   labels part of a numbered question, and treating it as a start would split
   every multi-part question. A bank that numbers whole questions (a), (b) …
   gets no text-layer proposals, and the in-charge draws its boxes.
-- **One box per question, until the sample banks say otherwise.** Two layouts
-  break it: a question that runs over a page or column break, and a shared
-  stimulus ("Use the table below for questions 5–7", or a figure printed above
-  the number). §9.2 step 1 measures how often these happen. This is decided
-  before PR 1, because it changes the schema:
-  - if it is more than a few percent of questions, a question holds up to
-    three boxes (a `question_boxes` child table), and compose stacks them in
-    order. A shared stimulus then becomes the first box of each question that
-    uses it;
-  - otherwise one box stays, the measured rate is written here, and such a
-    question is cropped as two questions or left out.
+- **A question holds up to four boxes.** This was decided by measurement,
+  as this plan said it would be: if more than a few percent of questions
+  needed a second box, a question would hold several. In ten of the centre's
+  banks, 80 of 495 questions need one, which is 16% (§9.2.1):
+  - 65 depend on something printed once above their number. Most are a
+    problem set's instruction ("Find dy/dx for the following", then sixteen
+    bare functions in a table). The rest sit under a figure or table "above";
+  - 15 run over a page break. A past paper's free-response question runs
+    over as many as four pages, which is where the limit of four comes from.
+
+  So a question is an ordered list of boxes (a `question_boxes` child table,
+  `box_no` 1–4), and compose stacks them in order. A shared stimulus is
+  cropped once and becomes the first box of every question that uses it.
+  A question longer than four boxes is cropped as two questions. §3.4, §4.3
+  and §6.2 are still drawn for one box; PR 1 redraws them.
 - **Layout is automatic.** Two short questions in a row share a page (§6.2).
   There is no layout control. One-per-page-always is added only if someone
   asks.
@@ -971,63 +975,122 @@ them, and rows only when their page is saved.
    `recordImages`, then `page.imageCoordinates`). This is checked first, so an
    OCR layer over a scan never counts as text. In testing, a partial OCR layer
    stretched a box down to the foot of the page.
-2. **Digital:** otherwise, at least 100 visible characters. A text item counts
-   as visible only if the rendered page has ink inside its bounding box. pdf.js
+2. **Digital:** otherwise, at least 20 visible characters. The bar was 100
+   until a real page failed it: a page of graphs under one printed question
+   has only its label line. A text item counts as visible only if the
+   rendered page has ink inside its bounding box. pdf.js
    reports no render mode per text item (a `TextItem` has `str`, `dir`,
    `transform`, `width`, `height`, `fontName` and `hasEOL`), so this ink test is
    what rejects invisible text drawn in render mode 3.
 3. **Neither** (text turned into outlines): no text-layer proposals and no AI.
    The in-charge draws the boxes.
 
-**Proposals.** These rules were tested on single-column pages, two-column
-pages, sub-parts, an offset CropBox, `/Rotate 90` and label variants.
+**Proposals.** These rules were first written against made-up pages, then
+rewritten against ten of the centre's own banks (§9.2.1). Five banks tuned
+them and five more tested them. `docs/worksheets/textlayer/propose.mjs` is the
+rules as run. The made-up pages still pass: two columns, a numbered list
+inside a question, an offset CropBox, `/Rotate 90` and label variants.
 
 1. **Coordinates.** Map every point through `viewport.convertToViewportPoint`
    and `convertToPdfPoint`. That one path handles `/Rotate` and CropBox
-   offsets.
-2. **Columns.** Look for an empty vertical band in the middle 30–70% of the
-   width. Accept it as a gutter only if both sides carry question numbers.
-3. **Lines.** Group text items by vertical centre, within half a glyph height.
-4. **Labels.** A label is the line's first token, matching, case-insensitive,
-   either:
-   - `^(?:Q(?:uestion)?\s*)?(\d{1,3})(?:[.):](?!\d)|$)`, or
-   - `^(?:Q(?:uestion)?\s*)?(\d{1,3})[.):]\s+\S` (number and text merged).
+   offsets. A past-paper bank's pages are offset by 50 pt, so this is not
+   academic.
+2. **Lines.** Group body-size text items by vertical centre, within half a
+   glyph height. Body size is the median height, weighted by characters.
+   - Items under ¾ of body size never start a line. Word's maths sets every
+     sub- and superscript, and both halves of every fraction, as items of
+     their own. As lines of their own they shrink the gap above a label to
+     nothing.
+   - Each small item joins the nearest line beside it, and that line's top
+     and bottom take it in. Left out, a fraction's numerator above the next
+     label reads as the last ink of the question above.
+3. **Labels.** A label is a line's first token, matching, case-insensitive,
+   one of:
+   - `^(?:Q(?:uestion)?|EX|Example)\s*(\d{1,3})(?:\s*[.):](?!\d)|$)`, a
+     prefixed number;
+   - `^(\d{1,3})[.):](?!\d)`, a bare number with its stop;
+   - `^(?:(?:Q(?:uestion)?|EX|Example)\s*)?(\d{1,3})[.):]\s+\S`, the number
+     and its text merged into one item.
 
-   These accept "1.", "1)", "Q2", "q2", "Question 3:" and "12. Express …", and
-   reject "(a)", "2.5", "3:15", "A1" and "1/2".
-5. **A label must:**
-   - sit within 6 pt of the column's leftmost label;
-   - have a gap above it taller than one line, or be first in its column;
-   - belong to the longest run of consecutive numbers in its column.
-6. **Box.**
+   Later in a line, `^(\d{1,3})[.)]` is a label only as the next cell of a
+   grid row (rule 4). These accept "1.", "1)", "Q2", "Question 3:", "EX 1:",
+   "EX 7 :" and "12. Express …". They reject "(a)", "2.5", "3:15", "A1",
+   "1/2", and a bare "78" at the start of a table's row. A bare number was
+   once accepted, and a column of consecutive data values became a run of
+   questions.
+4. **Runs.** Labels chain into runs of consecutive numbers, and every run is
+   kept. A bank page restarts its numbering for each section, up to four
+   times on one page.
+   - A label continues a run when it is the next number and either sits
+     under the run's left edge, within 6 pt, or follows the run's last label
+     on the same line. The second makes the run a **grid**: a problem set
+     printed as a table, one question per cell.
+   - When two runs could take a label, a label with a gap above it goes to
+     the run whose labels all have one. Otherwise it goes to the latest run.
+   - A run needs two labels, or a gap above its one label taller than body
+     text. Measuring against body text matters, because a line that holds
+     a big fraction is tall.
+   - A run that lies wholly between two labels of another run is a list
+     inside that question. It is dropped.
+5. **Columns.** An empty vertical band in the middle 30–70% of the width is a
+   gutter only if each side carries a run of two or more of its own. Read one
+   side at a time, a grid's cells are odd and even numbers, which is no run,
+   so a grid never splits.
+6. **Nothing is proposed** on a cover, which is a page with a "Name:" line and
+   a "School:" line. Covers carry a numbered contents list and numbered rules
+   for students. Nothing is proposed either from an answers heading to the end
+   of the file: "Answers", "Answer Key", "Mark Scheme", "Solutions", or a
+   title ending "(Answers)". Not any line that ends in "answer", because
+   "Justify your answer" wraps onto lines of its own.
+7. **Box.**
    - **Top:** the label line's top minus 4 pt.
-   - **Bottom:** the last *inked* row above the next label. For the last
-     question it is the last inked row above the footer band, which is the
-     outer 6% of the page height. A row is inked if any pixel has R+G+B below
-     600 on the rendered page.
-   - **Sides:** shrink to the ink within the column, plus 4 pt.
-   - Ink, not text, sets the bottom, so diagrams and answer lines under the
-     last line stay inside the box.
-7. Sub-parts (a)–(h) and (i)–(viii) never split a question.
-8. **Reading order.** When a page is saved, its crops get `pos` in reading
+   - **Left:** the label minus 4 pt, or any ink within 30 pt left of it on its
+     own line. That ink is a calculator icon, and it is part of the question.
+   - **Right:** on a grid, the next cell's label. Otherwise, a label at least
+     a quarter of the page to the right, inside this question's span. That is
+     a second column, never a list indented inside the question. Otherwise,
+     the column's edge.
+   - **Bottom:** the last *inked* row above the next label below that starts
+     inside the box's width, or above the footer band (the outer 6% of the
+     page) or the answers heading. A row is inked if any pixel has R+G+B below
+     600. Rows are scanned from the label's column rightwards, because the
+     strip left of it holds the next question's icon, which stands taller than
+     its line.
+   - **Sides:** shrink to the ink, plus 4 pt.
+   - Ink, not text, sets the bottom. Diagrams and answer lines stay inside
+     the box, and the blank working space a lesson page leaves under an
+     example stays out.
+8. Sub-parts never split a question: a.–z., a)–h), (a)–(h) and (i)–(viii).
+9. **Reading order.** When a page is saved, its crops get `pos` in reading
    order on the displayed page: columns left to right, then top to bottom.
    Displayed coordinates, not PDF ones, so a `/Rotate` page reads the way it
    looks.
 
-**Where it is known to miss:**
+**What it got on the sample banks (§9.2.1).** Every one of the 495
+questions has a proposal starting at its number. Of the boxes:
 
-- sections that restart their numbering on one page (only one run is kept);
+- 10 take in a heading or a notes box that sits between two questions, such
+  as "AP MCQ" or "Problem Set 3-1 Part 2". The in-charge drags the bottom edge
+  up;
+- 80 are only part of their question. They miss what is printed once above
+  the number, or they stop at a page break. Those questions need more than
+  one box (§2.2).
+
+12 proposals are not questions. All 12 are numbered lists in lesson notes,
+such as "Integrals are classified as improper for three reasons. 1. … 2. … 3.
+…". 507 proposals are made in all.
+
+**Where it is still known to miss.** None of these appeared in the sample
+banks:
+
 - labels like "A1", numbers drawn inside circles, or whole questions numbered
   (a), (b) … (§2.2);
-- broken fonts that extract digits as garbage;
-- unequal columns, or a diagram that crosses the gutter;
-- a shared figure printed above a question number, which the top rule puts in
-  the previous question's box (§2.2);
+- broken fonts that extract a label's digits as garbage. Word's maths font
+  extracts as garbage in every sample bank, but never a label;
+- a diagram that crosses a gutter;
 - content drawn sideways with no `/Rotate`.
 
-Each miss means fewer proposals, or none, and the person draws the rest. The
-thresholds were tuned on made-up pages, so check them against real banks first
-(§9.2).
+Each miss means fewer proposals, or none, and the person draws the rest.
 
 ### 5.2 Scanned pages: AI (on request, one page at a time)
 
@@ -1304,12 +1367,14 @@ browser cache never helps. A bank stays open for the tab (§4.5).
 
 - A 54 MB scan takes about 9 s at 50 Mbps and about 45 s on 10 Mbps home
   Wi-Fi, in every tab and for every teacher who opens it.
-- **The decision:** accept this for v1. Most banks are expected to be a few
-  MB, the size shows while it loads, and §9.2 step 1 measures the real banks.
+- **The decision:** accept this for v1, and the size shows while it loads.
+  The centre's own banks measured 0.2–2.9 MB, about 2 s at 10 Mbps
+  (§9.2.1).
 - **The pass bar** (§9.2 step 1): the first page of the largest real scanned
   bank shows in under 10 s on an iPad on home Wi-Fi. At 10 Mbps a bank over
   about 12 MB cannot meet it, so the sample banks' sizes already predict the
-  answer.
+  answer. The textbook banks in the centre's Drive are 15–82 MB, so they
+  fail on download time alone if they are cropped as they are (§9.2.1).
 - **If it fails, the fallback** stores each crop's own picture: the 300 dpi
   JPEG of §6.3, which depends only on the crop's box (§6.2). The in-charge's
   machine renders it once when the page is saved, and stores it at
@@ -1385,7 +1450,8 @@ how it names the boards, and whether a Space has a board limit are checked in
 The owner has not given volumes. The design handles the following:
 
 - **Banks:**
-  - digital banks are typically a few MB;
+  - the centre's own banks are 0.2–2.9 MB, 7–25 pages each, with 11–84
+    questions (§9.2.1). Its textbook banks are 15–82 MB;
   - the largest scanned bank tried (for download time, §6.4) was 200 pages
     and 54 MB. A 300 ppi colour scan measured 0.87 MB a page, so a 200-page
     bank is about 170 MB;
@@ -1452,7 +1518,7 @@ The owner has not given volumes. The design handles the following:
 | A PDF that needs a password to open | Refused, with a message. |
 | A file that is not a readable PDF | "This file isn't a readable PDF." |
 | A bank locked by its publisher against printing or copying | Opened and cropped like any other. Its worksheet is not locked (§2.1 item 14). |
-| A question split across columns or pages, or sharing a figure | One box per question, or up to three if §9.2 step 1 says so (§2.2). |
+| A question split across columns or pages, or sharing a figure | Up to four boxes per question, measured on the sample banks (§2.2, §9.2.1). |
 | A sideways page with no `/Rotate` | Shown sideways. Fix the PDF before cropping. A re-upload is a new file, so crops do not carry over. |
 | Two in-charges crop the same page at once | Duplicates are possible; delete one (§2.2). If one changes or removes a crop the other just removed, that save is refused whole, and *Reload page* shows what is saved (§4.3). |
 | A page save fails | Nothing is written. The drafts stay on screen with *Try again*. |
@@ -1532,20 +1598,24 @@ local Postgres 16. It:
 
 0. **The owner**, who answered the plan's questions on 2026-10-17 (§2.1,
    items 10–14):
-   - sends 3 or 4 sample banks;
+   - sends sample banks. **Done 2026-10-17:** the centre's Drive folder of
+     course material;
+   - says whether the textbook banks are scans (§9.2.1);
    - sends the topic list for each level (§2.1 item 12).
 1. **Checks before any code (about a day).** Each check names what its
    answer changes.
-   - **The sample banks:**
+   - **The sample banks.** All done 2026-10-17 except the last item; the
+     results are in §9.2.1:
      - size per file, which predicts the §6.4 pass bar;
      - image codecs (`pdfimages -list`);
      - label styles, sections that restart numbering, and column layouts,
        for §5.1;
      - the share of questions that span a page or column break, or depend on
-       a shared figure or table, which decides one box or up to three (§2.2)
-       before PR 1;
+       a shared figure or table. This decided before PR 1 between one box
+       and several (§2.2): several;
      - how often two in-charges would crop one bank at once, which decides
-       whether "crop once" needs a trigger (§2.2).
+       whether "crop once" needs a trigger (§2.2). Not measurable from files;
+       the owner knows.
    - **Supabase:** the plan, and the project's global file-size limit. On
      Free, scans over 50 MB are split before upload (§8.1). Then apply the
      migration to a Supabase project with a seeded course of 25,000 crops
@@ -1575,7 +1645,8 @@ local Postgres 16. It:
        Safari's Web Inspector open: memory stays flat (§4.5,
        `page.cleanup()`).
 2. **PR 1, database:**
-   - the migration, in the one-box or multi-box shape step 1 chose;
+   - the migration, in the multi-box shape step 1 chose (§2.2): §3.4's
+     tested draft is one box, and is redrawn with `question_boxes` first;
    - `supabase/tests/{shim.sql,questions.sql,run.sh}`, `schema.sql`, the
      types and the docs;
    - **apply it to Supabase** with the SQL editor (paste the file) or
@@ -1588,7 +1659,9 @@ local Postgres 16. It:
      Whichever lands second merges the other first.
 4. **PR 3, the Questions page and the worksheet:** the picks, the modal,
    compose and the two template PDFs.
-5. **AI:**
+5. **AI**, only if a scanned bank is going to be cropped. None of the
+   centre's own banks has a scanned question page (§9.2.1). If the textbook
+   banks are not scans either, this step and PR 4 are not needed:
    - run the measurement in §5.2;
    - if a pair reached 98%, set `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` and,
      if measured, `ANTHROPIC_EFFORT` in Vercel, for Production and Preview,
@@ -1606,6 +1679,91 @@ local Postgres 16. It:
    In-charges start cropping. Each new year, each bank-holding course's
    in_charge updates its teachers, and nothing else (§2.1 item 10).
 
+### 9.2.1 What the sample banks showed (2026-10-17)
+
+The owner shared the centre's Drive folder of course material. Ten banks
+from it were measured with `docs/worksheets/textlayer/propose.mjs`. The first
+five tuned §5.1's rules. The second five were held out, run once untouched,
+and then fixed where they failed. The banks themselves are not in the
+repository.
+
+| Bank | MB | Pages | Questions | Need an extra box: printed above / over a page |
+|---|---|---|---|---|
+| AP CAL Unit 10 Question Bank Section 1 | 0.18 | 7 | 32 | 22 / 2 |
+| AP CAL Unit 3 Question Bank Section 1 | 0.22 | 8 | 42 | 8 / 0 |
+| AP CAL Unit 2 Question Bank Section 3 | 0.79 | 14 | 82 | 34 / 0 |
+| PCS Exponential and Logarithm Function Question Bank | 0.73 | 15 | 76 | 0 / 2 |
+| Question Bank - Unit 7 (Past Year Paper only) | 0.39 | 22 | 17 | 0 / 4 |
+| *held out:* AP CAL Unit 6 Question Bank Section 1 | 0.90 | 25 | 65 | 0 / 1 |
+| AP CAL Unit 8 Question Bank Section 1 | 0.50 | 12 | 43 | 1 / 0 |
+| AP CAL Unit 4 Question Bank Section 2 | 0.63 | 13 | 43 | 0 / 0 |
+| PCS Polynomial Function Question Bank | 1.91 | 18 | 84 | 0 / 1 |
+| Question Bank - Unit 8 and 9 (PYP only) | 0.82 | 21 | 11 | 0 / 5 |
+| **Total** | | **155** | **495** | **65 / 15** |
+
+About 110 of the 155 pages were checked by eye, with the proposals drawn on
+them. On the rest, every number of each run is present exactly once.
+
+- **Kind of page.** Every question page in all ten is digital. The banks are
+  made in Word and exported on a Mac, or are past papers assembled in
+  Acrobat. The only pages that are pictures are in the mark schemes (the "MS"
+  files, 3.6–18 MB), whose worked solutions are handwritten on an iPad.
+  Those are answers and are never cropped. Images are Flate or JPEG, with no
+  JBIG2, JPEG 2000 or CCITT.
+- **Answers.** The owner said answers mostly come separately. They do: in the
+  MS file, as worked solutions. Every centre bank also ends with a short
+  answer list under "Answers", where the suggestions stop (§5.1 rule 6). The
+  in-charge crops from the bank, not from its MS.
+- **Layouts the made-up pages did not have.** Each is now a rule in §5.1:
+  - one page mixes lesson notes, worked examples ("EX 1:"), AP MCQ, AP FRQ
+    and problem sets, and restarts the numbering for each, up to four times
+    on a page;
+  - a problem set is often a table, with two or three numbered cells to a
+    row;
+  - one-line questions follow each other with no gap between them;
+  - Word's maths sets every fraction as separate small text items, and its
+    font extracts as garbage. Labels are never affected;
+  - a calculator icon is printed left of the number;
+  - a cover carries a numbered contents list and numbered rules for
+    students;
+  - a past paper's pages are offset by 50 pt.
+- **How well the rules did.** Held out, the rules as tuned on the first five
+  banks were right for 244 of 246 questions. They missed a page that is all
+  graphs (the 100-character bar), and one box was cut short by an indented
+  list. They also proposed one answer section as questions, because its
+  heading was a title ending "(Answers)", and they cut the calculator icon off
+  about 20 boxes. Four general fixes took them to all 246, and changed
+  nothing on the first five. Final figures on all ten are in §5.1: 495 of
+  495, 10 boxes to trim, and 12 false proposals.
+- **Questions needing more than one box: 80 of 495 (16%).** This decides
+  §2.2 for several boxes.
+  - Printed above, 65: 60 are a problem set's instruction, printed once
+    over a table of bare expressions. It always sits directly under the
+    problem set's heading and above its first number, so PR 2 can propose it
+    as the first box of every question in that run. The other 5 sit under a
+    figure or table "above".
+  - Over a page, 15: 9 of the past papers' 28 free-response questions, which
+    run over as many as four pages, and 6 long examples or pages of graphs
+    that run onto the next page.
+- **Compose** (§6.4), in Node at 300 dpi from these banks, with the proposed
+  boxes: 20 picks took 1.4 s (1.2 MB) from AP CAL Unit 2 and 2.2 s (2.8 MB)
+  from PCS Exponential. 16 past-paper picks took 1.7 s (5.6 MB).
+- **Not measured:**
+  - **the textbook banks**, such as "Question Bank - Unit 5 and 6 (Textbook
+    only)" and "Question Bank - Unit 1_Textbook". They are 15–82 MB, over the
+    Drive connector's 10 MB download limit, so none was opened. Drive's own
+    text of one reads like a text layer (two-column exercises, "1. Voters.
+    …"), but Drive also reads scans, so whether they are scans is unknown.
+    The answer decides three things:
+    - whether the AI is needed at all (§9.2 step 5);
+    - the §6.4 pass bar, which any bank over about 12 MB fails on download
+      alone at 10 Mbps (82 MB is 66 s);
+    - on Supabase Free, whether the 53–82 MB ones must be split, since they
+      are over the 50 MB upload limit (§8.1).
+  - how often two in-charges crop one bank at once;
+  - the Supabase, Pencil and iPad checks of step 1, which need the owner's
+    project, accounts and devices.
+
 ### 9.3 Out of scope
 
 - pushing anything into Pencil, or putting worksheets in Pencil Files;
@@ -1613,7 +1771,7 @@ local Postgres 16. It:
 - answer keys and worked solutions, unless the owner asks;
 - saved worksheets, history, or a record of which child got what. Under
   current RLS a teacher cannot even read the course's student list.
-- questions in several pieces, unless §9.2 step 1 says otherwise;
+- questions of more than four boxes (§2.2);
 - worksheet numbering, a layout control and reordering picks;
 - a page-rotation override;
 - OCR without AI (`tesseract.js` stays in reserve);
@@ -1660,6 +1818,9 @@ nothing applies or serves:
 - `run.sh`: applies every migration plus the draft twice, then runs the probe
   (`PGPASSWORD=postgres PGHOST=localhost PGUSER=postgres bash docs/worksheets/run.sh`);
 - `template-{lesson,homework}.pdf`, with the HTML each was printed from;
+- `textlayer/propose.mjs`: §5.1's suggestions as measured on the sample
+  banks (§9.2.1). It draws each page's proposals onto a PNG and prints them as
+  JSON, with each box also in PDF space, as `compose.mjs` takes it;
 - `raster/`: `make-banks.py`, which writes the test banks (digital, the 4-page
   200 ppi grey scan, rotated, locked, the layered bank of §6.3, and a 40-page
   300 ppi colour scan); `compose.mjs`, the all-raster compose measured in
@@ -1672,7 +1833,8 @@ nothing applies or serves:
 PR 1 moves the migration into `supabase/migrations/` under a fresh version,
 and the shim, probe and runner to `supabase/tests/{shim.sql,questions.sql,run.sh}`.
 PR 3 moves `template-{lesson,homework}.pdf` to `public/worksheet/` (§6.1, §9.2
-step 4). `raster/` is evidence only and moves nowhere.
+step 4). `raster/` and `textlayer/` are evidence only and move nowhere; PR 2
+writes §5.1 for the browser.
 
 ## Review notes
 
