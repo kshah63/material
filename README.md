@@ -101,8 +101,10 @@ DEPLOYMENT.md → "Bootstrap the first admin".
 
 These follow the spec's recommendations; each is a small change to revisit later:
 
-- **Download allowed.** Signed URLs permit download. True view-only (DRM) is out
-  of scope.
+- **Staff download, students view.** Admins and a course's in-charges and
+  teachers get a Download button; students get a view-only preview with the
+  browser's PDF toolbar hidden. That removes the button, not the bytes: true
+  view-only (DRM) is out of scope.
 - **Keep-both naming.** Re-uploading a duplicate name appends ` (2)`.
 - **PDF-only.** Enforced on upload and at the Storage bucket. Loosen by editing
   the mime filter in `lib/upload/tree.ts` and the bucket's `allowed_mime_types`.
