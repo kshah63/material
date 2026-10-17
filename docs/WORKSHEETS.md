@@ -4,8 +4,9 @@ Plan, 2026-10-17, revised the same day after review, again after the owner
 answered its five open questions (§2.1, items 10–14), and again after a
 review of that revision. The owner then asked for it to be built small: each
 crop's picture is made on demand, when a worksheet is drawn (§6.3), and there
-is no AI step for now (§2.1 item 9). The database, PR 1, is built (§3); the
-screens and the worksheet are not. The reviews' findings,
+is no AI step for now (§2.1 item 9). The database, PR 1, is built (§3), and
+so is the page view, PR 2 (§4.3, with its "as built" notes); the Questions
+page and the worksheet are not. The reviews' findings,
 and the few this plan does not take, are listed at the end.
 
 ## 1. What it is and who uses it
@@ -690,6 +691,10 @@ The screens follow the existing ones:
 - **`components/icons/index.tsx`**: add one `CropIcon`, built on `Base` and
   used in both places.
 
+**As built (PR 2).** *Crop questions* is in the file menu, after *Open*, and
+opens the page view. The header's *Questions* link is not there yet: it comes
+with the Questions page in PR 3, so `CropIcon` has one use for now.
+
 ### 4.2 Questions: the cropped banks
 
 **Route:** `app/(app)/courses/[courseId]/questions/page.tsx`.
@@ -910,12 +915,81 @@ says.
 - Both use `createClient()`, so RLS decides who may do this, and neither adds
   a role check in TypeScript.
 
+**As built (PR 2).** `components/questions/PageView.tsx` holds the screen and
+`Stage.tsx` the overlay and its gestures; `lib/worksheet/crops.ts` holds the
+screen's state, its edits and the one `save_crops` call they make. Where it
+differs from the text above:
+
+- **Route.** The bank's read is `listFileQuestions` (the plan's `listBank`).
+  The route also passes the signed-in person's id, which the picks are kept
+  under (§4.4).
+- **Header.** The back link goes to the bank's folder in the course and
+  carries the course's name, since the Questions page comes in PR 3. *Topic
+  for new questions* sits in the toolbar row under the header, labelled "New
+  questions", beside a chip naming the kind of page (§5.1) and *Accept all
+  (n)*; *Save* stays in the header. The picks bar is "{n} picked · ×", and
+  gains *Make worksheet* in PR 3.
+- **The toolbar of a question** also has *Remove box* on a question with
+  several boxes, and each "continues on p. 13" or "starts on p. 11" is a
+  button to that page. The arrow keys nudge the selected box 1 pt, 10 with
+  Shift.
+- **Pick** is offered only on a saved question: a draft has no row a
+  worksheet could read, so its pick could never resolve.
+- **Stimulus** is offered only on a draft, a new question's one box. On a
+  saved question it would have deleted the question at the next save,
+  leaving its box as an unsaved stimulus. *Done* lets go of the stimulus in
+  hand.
+- **A box cropped twice** is a rectangle shared like a stimulus, but it is
+  not one: selecting it reads "Cropped twice · This box is saved as 2
+  questions." with *Delete one*, and it is never put in hand, so the next box
+  drawn is a question of its own and not a third copy under it.
+- **Delete** of a question's own box, under a stimulus other questions share,
+  deletes the question: what it had left is only their stimulus, which would
+  otherwise be saved as a question of its own.
+- **Saving** also happens, as a last try, when the page view is left another
+  way, such as the browser's Back. A refused save is shown by kind:
+  - `42501` and `23505`: as above, with *Reload page*;
+  - `save_crops`'s own `23514` messages ("A saved box keeps its page: …", "A
+    question needs at least one box.") as written; any other code of class
+    22 or 23 as "The database refused a value on this page (22003).", since
+    Postgres's own messages name tables and constraints. The message goes to
+    the server's log. Trying again cannot pass, so there is no *Try again*;
+  - anything else, `40P01` and a failed request included: "Not saved. *Try
+    again*."
+- **The back link** saves first and stays on a save that fails, with why. When
+  the failure is one only *Reload page* clears (changed elsewhere, the bank
+  gone to Trash, signed out), the next click asks "Leave without saving?" and
+  leaves on OK.
+- **States.** The error card has *Try again*, which opens the bank afresh,
+  except for a PDF that needs a password or is not a PDF. A bank whose
+  `/pdfjs/` files are missing, stale or unreachable is refused with "This
+  site's PDF reader is incomplete…" (§8.3). A page with an image that did not
+  decode gets the line "Part of p. 3 didn't draw: …" and *Try again* (§8.3).
+  Suggestions read "Finding suggestions…" while they are worked out, and
+  "Suggestions failed on this page. Drag to draw a box." if they fail. A
+  teacher on a bank with nothing cropped sees "Nothing is cropped in this
+  bank", and the bank is not downloaded.
+- **`savePage(fileId, changes)`** takes no course: it calls `save_crops`,
+  reads the bank back, and revalidates `/courses/[courseId]/questions/[fileId]`
+  by its route pattern, never a path the caller names. An empty change set is
+  only the read-back, with no `save_crops` call and no revalidation. It
+  refuses a caller who is not signed in and changes that are not the shape
+  above, before anything reaches the database. `preparePicks` comes in PR 3.
+
 ### 4.4 Make worksheet
 
 **Picks** are question ids in `sessionStorage` under one key per course, read
 and written inside `try`/`catch` so a blocked storage only means picks do not
 survive a reload. They persist across pages, banks and a visit to the
 Viewer.
+
+**As built (PR 2).** `hooks/usePicks.ts` keeps them under
+`worksheet-picks:{userId}:{courseId}`, one key per course for each person:
+signing out keeps the tab, so on a shared centre computer the next teacher
+would otherwise find the last one's picks. `readPicks(userId, courseId)` is
+what the modal reads. The banks a tab has open (§4.5) outlive a sign-out too,
+so the modal opens banks only from `preparePicks`'s rows, read under the
+session at hand, never from the picks alone.
 
 **Opening the modal** first calls `preparePicks(courseId, ids)` once. In one
 action it:
@@ -1027,6 +1101,25 @@ line under them, on the template pages with `pdf-lib` (§6.2).
 There is no `lib/worksheet/ai.ts` for now (§2.1 item 9). §5.2 describes it,
 for if AI is built later.
 
+**As built (PR 2).**
+
+- `openBank(fileId, sizeBytes, signUrl)` asks for a signed URL only when the
+  bank is not open in the tab already, and holds the bank until its
+  `release()`. A bank that failed to open is forgotten, so the next try starts
+  over; `closeBank(fileId)` closes one that is open, which is how *Try again*
+  gets a new pdf.js worker (§8.3).
+- Before a bank's download, `/pdfjs/version.json` must match the worker's
+  version (once per tab) and `wasm/jbig2.wasm`, `openjpeg.wasm` and
+  `qcms_bg.wasm` must answer a `HEAD` (every bank). `imagesFailed(page)` says
+  whether an image on a page just drawn did not decode (§8.3).
+- `source.ts` also holds `toPdfBox` and `toViewRect`, the two conversions
+  between PDF space and the screen, `pageBox`, and `suggestionsFor`, which
+  feeds a page's text content and ink to `propose.ts`.
+- `propose.ts` is the text-layer rules only (§5.1). Reading order (`pos`)
+  is `readingOrder` in `lib/worksheet/crops.ts`, because it is worked out from
+  the boxes being saved, drawn by hand or not.
+- `compose.ts` comes in PR 3.
+
 ### 4.6 Everything touched
 
 **New files:**
@@ -1059,6 +1152,24 @@ for if AI is built later.
 - `supabase/schema.sql`, `DEPLOYMENT.md` and `README.md` (built, PR 1).
 
 `next.config.ts` stays empty.
+
+**As built (PR 2).**
+
+- New: the page view's route (§4.3); `app/actions/questions.ts` with
+  `savePage`; `components/questions/{PageView,Stage}.tsx`;
+  `lib/worksheet/{source,propose,crops}.ts`; `hooks/usePicks.ts`;
+  `scripts/copy-pdfjs-assets.mjs`; `supabase/tests/crops.mjs`, which
+  `run.sh` runs (§9.1).
+- Changed: `Rows.tsx`, `Browser.tsx`, `icons/index.tsx`; `lib/queries.ts`,
+  which gains `getFile`, `listFileQuestions`, `listTopics` and `canCropFile`;
+  `proxy.ts`, whose matcher skips `pdfjs/` only, with `worksheet/` to follow
+  in the PR that adds the templates; `package.json` (`pdfjs-dist` 6.4.299 and
+  the `postinstall`); `.gitignore`; `eslint.config.mjs`, which ignores
+  `public/pdfjs/`; `DEPLOYMENT.md`; `README.md`'s permission matrix;
+  `supabase/tests/run.sh`.
+- PR 3 adds the Questions page, `QuestionsView`, `WorksheetModal`,
+  `compose.ts`, `preparePicks`, `listQuestionSources`, `pdf-lib` and the
+  templates.
 
 ## 5. Suggestions
 
@@ -1163,6 +1274,29 @@ inside a question, an offset CropBox, `/Rotate 90` and label variants.
    order on the displayed page: columns left to right, then top to bottom.
    Displayed coordinates, not PDF ones, so a `/Rotate` page reads the way it
    looks.
+
+**As built (PR 2).**
+
+- Rules 1–8 are `lib/worksheet/propose.ts`, a port of `propose.mjs` v1 with
+  one function per rule. It is fed pdf.js's text content and the page drawn
+  at 144 dpi for its ink, by `suggestionsFor` in `source.ts`, for the page on
+  screen in crop mode, once per page per open bank. The answers heading (rule
+  6) is looked for from page 1 onwards, text only, once per open bank. The
+  ink test of kind-of-page step 2 is not ported, as it is not in
+  `propose.mjs`: none of the sample banks has invisible text.
+- Rule 9 is `readingOrder` in `lib/worksheet/crops.ts`, from the boxes alone,
+  however they were made. The gutter is the widest band of the middle 30–70%
+  of the page that no box crosses, measured exactly rather than in 1% steps
+  (two columns' boxes can be 2–4 pt apart), with two boxes or more on each
+  side. A page is a grid, read row by row, only when most boxes on the side
+  with fewer have a box beside them at the same height (tops within 6 pt)
+  that all but touches it across the gutter (within 8 pt): a grid's cell ends
+  at the next cell's label (rule 7). Rows that only line up are not enough,
+  since two columns numbered down each column often line up. On the 381
+  pages of the 53 sample banks with two proposals or more, with every
+  proposal accepted, no consecutive pair of numbers is saved out of order;
+  reading row alignment alone, and the gutter in 1% steps, put 4 pages out
+  of order (`g6-math-fluency-1-merged` p. 2 read 1 21 2 22 …).
 
 **What it got on the sample banks (§9.2.1).** Every one of the 495
 questions has a proposal starting at its number. Of the boxes:
@@ -1655,6 +1789,30 @@ The owner has not given volumes. The design handles the following:
 | A bank's bytes are replaced in Storage under the same name | Every crop points at different content. §9.4 item 4. |
 | A box saved on a page past the bank's end (only by a crafted call) | The page view ignores it, and the modal drops its pick as removed (§4.3, §4.4). |
 
+**As built (PR 2).**
+
+- **The decoders.** A bank opens only if `/pdfjs/version.json` matches the
+  worker and the three decoders under `/pdfjs/wasm/` answer; otherwise the
+  card reads "This site's PDF reader is incomplete: its files under /pdfjs/
+  are missing, unreachable or from another version …", with *Try again*. A
+  folder blocked or unreachable while `version.json` loads used to draw
+  CCITT pages white and JBIG2 pages without their text, with nothing on
+  screen.
+- **A decoder that fails later**, after that check passed: pdf.js keeps the
+  failure for the life of the bank's worker, so every such page of the bank
+  stays blank until the bank is opened again. A page with an image that did
+  not decode (pdf.js hands it over as nothing) reads "Part of p. 3 didn't
+  draw: an image on it couldn't be decoded, …", and *Try again* closes the
+  bank and opens it in a new worker. Not caught: a JBIG2 *image mask* (text
+  stamped over a background) whose decoder fails, since pdf.js then drops
+  the drawing command in its worker and tells the page nothing, and ICC
+  colours if `qcms_bg.wasm` fails. Both need the decoder's fetch to fail
+  after the check passed, when the worker first meets such an image;
+  reloading the tab cures them.
+- **Two in-charges crop the same page at once.** A box both saved is
+  "Cropped twice" with *Delete one* (§4.3), and the next box drawn is never
+  put under it.
+
 ## 9. Tests, rollout, out of scope
 
 ### 9.1 Checks this repo can run
@@ -1740,6 +1898,24 @@ boxes run 1..n.
     `can_crop_file`, `topic_fits` or `save_crops`, calls `auth.uid()` outside
     `(select auth.uid())`; `questions_select` and `question_boxes_select` are
     the same text, apart from the table name.
+
+**As built (PR 2).** `run.sh` then runs `supabase/tests/crops.mjs` in Node
+(22.18 or newer, which strips TypeScript's types itself), against the same
+scratch database. Each step edits the screen's state with the functions the
+page view calls (`lib/worksheet/crops.ts`), sends the one call `diff()` builds
+to the real `save_crops` as an in-charge, reads the bank back as the page view
+does, and checks that the bank is what the screen showed, with nothing left to
+save and every question's boxes numbered 1..n. Its 17 checks: new questions
+with their reading order; a stimulus copied into new questions, put above a
+saved one, moved and deleted; a box moved and topics changed and cleared; a
+question continued onto page 2; a page's reading order saved as `{id, pos}`;
+stale screens refused with `42501` and `23505`, writing nothing; a question
+deleted over two pages; a box cropped twice and one copy deleted; four boxes
+at most; a saved box made a stimulus; what a save keeps in hand; reading
+order (two columns, a grid, two columns whose rows line up, a gutter
+narrower than 1% of the page, a box across the gutter, one box a side, a
+rotated page); a question's own box deleted under a shared stimulus; and a
+teacher reading what the in-charge saved.
 
 **Manual checks:**
 

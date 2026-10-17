@@ -37,6 +37,7 @@ deletes.
 | View teacher-only material | — | ✓ | ✓ | ✓ |
 | Upload / create / rename / move / delete | — | — | ✓ | ✓ |
 | View Trash + restore | — | — | ✓ | ✓ |
+| Crop questions from a teacher-only bank | — | — | ✓ | ✓ |
 | Manage members / courses / invites | — | — | — | ✓ |
 
 ---
@@ -75,6 +76,7 @@ supabase/
   migrations/             schema · functions · triggers · rls · storage · questions
   schema.sql              all migrations concatenated (one-shot paste)
   tests/run.sh            applies every migration to a scratch Postgres, runs the SQL tests
+  tests/crops.mjs         the crop screen's save (lib/worksheet/crops.ts) against the real save_crops
   functions/purge/        Edge Function alternative to the cron route
 ```
 

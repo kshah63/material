@@ -1,7 +1,8 @@
 #!/bin/bash
 # Applies every migration to a scratch Postgres, the worksheet migration a second
-# time (to prove it can be run twice), then runs the SQL tests. The scratch
-# database is dropped however the run ends.
+# time (to prove it can be run twice), then runs the SQL tests and, in Node, the
+# crop screen's save (crops.mjs). The scratch database is dropped however the
+# run ends.
 #   PGHOST=localhost PGUSER=postgres bash supabase/tests/run.sh
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -18,3 +19,6 @@ for f in ../migrations/*.sql "$TWICE"; do
 done
 echo "applied every migration, and $(basename "$TWICE") twice"
 psql -q -v ON_ERROR_STOP=1 -d "$DB" -f questions.sql
+# The crop screen's save (lib/worksheet/crops.ts), built in Node and sent to the
+# real save_crops in the same scratch database.
+node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON crops.mjs "$DB"

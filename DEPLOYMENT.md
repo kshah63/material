@@ -259,4 +259,12 @@ returning name, position;
   `courses/{course_id}/{file_id}.pdf`.
 - **A student can't see a file you expect.** Check the item (or an ancestor
   folder) isn't marked teacher-only — the butter-yellow highlight flags it.
+- **A bank says "This site's PDF reader is incomplete".** pdf.js's wasm, fonts,
+  CMaps and ICC profiles are copied into `public/pdfjs/` by the `postinstall`
+  script (`scripts/copy-pdfjs-assets.mjs`), and are not in git. An install run
+  with `--ignore-scripts` skips it; redeploy with a plain `npm install`. The
+  same card shows when the files are there but the browser cannot fetch
+  `/pdfjs/wasm/`, for example through a school filter or proxy that blocks
+  `.wasm` files. Without them a scanned page would draw blank, so the page view
+  refuses to open a bank until they can be fetched.
 ```

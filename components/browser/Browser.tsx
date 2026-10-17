@@ -388,6 +388,7 @@ export function Browser(props: BrowserProps) {
                   selectionActive={selectionActive}
                   caps={caps}
                   onOpen={() => setViewing(file)}
+                  onCrop={() => router.push(`/courses/${courseId}/questions/${file.id}`)}
                   onRename={() => setRenameTarget({ kind: "file", file })}
                   onMove={() => setMoveTargets([{ kind: "file", file }])}
                   onDelete={() => setDeleteTargets([{ kind: "file", file }])}

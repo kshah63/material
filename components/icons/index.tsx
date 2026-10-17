@@ -184,6 +184,14 @@ export const ArrowLeftIcon = (p: IconProps) => (
   </Base>
 );
 
+/** Crop marks — cropping questions out of a bank. */
+export const CropIcon = (p: IconProps) => (
+  <Base {...p}>
+    <path d="M7 3v13a1 1 0 0 0 1 1h13" />
+    <path d="M3 7h13a1 1 0 0 1 1 1v13" />
+  </Base>
+);
+
 export const SpinnerIcon = (p: IconProps) => (
   <svg
     width="18"

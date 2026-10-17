@@ -12,7 +12,11 @@ export const config = {
     /*
      * Match all request paths except static assets and image files. Keeps the
      * session fresh and enforces auth on everything that renders the app.
+     * public/pdfjs/ (pdf.js's wasm, cmaps, fonts and ICC profiles) is static
+     * too: without this, every one of those requests costs a Supabase
+     * getUser() round trip. No app route may live under /pdfjs/, since it
+     * would lose the session refresh and the sign-in redirect.
      */
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|pdfjs/|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
   ],
 };
