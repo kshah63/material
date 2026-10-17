@@ -66,7 +66,7 @@ export function Viewer({
           )}
         </div>
         <div className="flex items-center gap-2">
-          {/* Only admins / the course in-charge get a download link. */}
+          {/* Students get no download link. */}
           {downloadUrl && (
             <a
               href={downloadUrl}
@@ -98,7 +98,7 @@ export function Viewer({
         ) : (
           <iframe
             // Without download rights, also hide the browser PDF viewer's own
-            // toolbar (it has download/print buttons). Managers keep it.
+            // toolbar (it has download/print buttons). Staff keep it.
             src={downloadUrl ? url : `${url}#toolbar=0&navpanes=0`}
             title={file.name}
             className="w-full h-full rounded-[12px]"

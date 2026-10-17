@@ -61,12 +61,17 @@ cannot use.
 7. Plan first. Nothing is built yet.
 8. **Teachers download worksheets.** Goal (3) has the teacher get the PDF.
    What follows from it:
-   - Today teachers can view banks but not download them (commit a76d16e,
-     `app/actions/files.ts:158-160`). Worksheets relax that for crops, and
-     only for crops.
-   - Every crop is a picture of its own box (item 11, §6.3), so a worksheet
-     carries the questions picked and nothing else of the bank. a76d16e's
-     restriction still holds for the rest of it.
+   - *Changed later on 2026-10-17:* *"Okay give the teachers download
+     access."* Pencil cannot be sent a file, so a PDF reaches a child's Space
+     only from somebody's own computer, and teachers today give whole
+     booklets or mark questions in them. `getViewUrl` now gives a course's
+     teachers the Download button that a76d16e had kept for admins and
+     in-charges, on every file they can open, teacher-only folders and mark
+     schemes included. Students still only view. So a worksheet no longer
+     relaxes anything for the teacher.
+   - Every crop is still a picture of its own box (item 11, §6.3), so a
+     worksheet carries the questions picked and nothing else of the bank.
+     That protects whoever the worksheet reaches, not the teacher.
 9. **AI proposes boxes on scanned pages.** Goal (2) says so. What follows from
    it:
    - When an in-charge presses *Suggest boxes*, that page's image is sent to
