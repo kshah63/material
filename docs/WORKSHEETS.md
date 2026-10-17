@@ -1,9 +1,10 @@
 # Worksheet maker
 
-Plan, 2026-10-17, revised the same day after review. Nothing is built yet.
-The owner has approved the goal, and this plan is for review before any code
-is written. The review's findings, and the few this plan does not take, are
-listed at the end.
+Plan, 2026-10-17, revised the same day after review, again after the owner
+answered its five open questions (§2.1, items 10–14), and again after a
+review of that revision. Nothing is built yet. The owner has approved the
+goal, and this plan is for review before any code is written. The reviews'
+findings, and the few this plan does not take, are listed at the end.
 
 ## 1. What it is and who uses it
 
@@ -23,12 +24,13 @@ a child's Pencil Space. It works in four steps:
 3. **Pick and print.** A teacher opens a bank page by page, clicks the
    questions they want, and downloads a branded A4 PDF. Each question sits at
    the top of its own page, and the rest of the page is blank for working.
-   Short questions go two to a page. Where the source is vector, the crop
-   stays vector-sharp.
+   Short questions go two to a page. Every question is a 300 dpi picture of
+   its own box, so nothing else on the bank's page goes with it.
 4. **Into Pencil.** The teacher drags the PDF into the child's Space and
    chooses "one page per board".
 
-Roles, per course:
+Roles, per course. Banks live in one bank-holding course per level (§2.1
+item 10), so for banks these are roles in that course:
 
 - **in_charge and admin** crop, adjust, delete and tag questions. They can
   also do everything a teacher does.
@@ -52,21 +54,19 @@ cannot use.
 4. Suggestions come from the text layer on digital pages and from AI on
    scanned pages. A person always confirms them.
 5. The output is a branded A4 PDF (§6), with one question at the top of each
-   page, or two per page for short ones. Vector stays vector.
+   page, or two per page for short ones. (This item also said "vector stays
+   vector". Item 11 replaces that: every crop is a picture.)
 6. Delivery is by hand. Pencil has no boards API, so the teacher drags the PDF
    in with "one page per board".
 7. Plan first. Nothing is built yet.
 8. **Teachers download worksheets.** Goal (3) has the teacher get the PDF.
    What follows from it:
    - Today teachers can view banks but not download them (commit a76d16e,
-     `app/actions/files.ts:158-160`). Worksheets relax that for crops.
-   - A vector crop carries its whole source page, hidden but extractable
-     (§6.3). A teacher who picks one question from each page of a bank
-     therefore exports every page of it. For banks, a76d16e's restriction no
-     longer protects anything. That matters only if the hidden content
-     includes answers, which is §2.3 question 2.
-   - Scanned crops carry only their own box (§6.3), so they export nothing
-     else.
+     `app/actions/files.ts:158-160`). Worksheets relax that for crops, and
+     only for crops.
+   - Every crop is a picture of its own box (item 11, §6.3), so a worksheet
+     carries the questions picked and nothing else of the bank. a76d16e's
+     restriction still holds for the rest of it.
 9. **AI proposes boxes on scanned pages.** Goal (2) says so. What follows from
    it:
    - When an in-charge presses *Suggest boxes*, that page's image is sent to
@@ -77,6 +77,83 @@ cannot use.
      $0.001–0.05 a page before thinking tokens.
    - If no setting finds at least 98% of question numbers, AI ships switched
      off and scanned pages are drawn by hand.
+
+The owner (Kartik) answered the plan's five open questions later on
+2026-10-17. Each answer is quoted, and the plan is changed to match.
+
+10. **Banks are kept for next year's course, in one bank-holding course per
+    level.** *"Yes banks are used for next years course."* Crops belong to one
+    file, a file belongs to one course, and the portal cannot share or copy a
+    file across courses. A bank kept in a class's course would therefore be
+    uploaded and cropped again for next year's course once this one is
+    archived (`courses.archived_at`). Instead:
+    - each level's banks live in one long-lived bank-holding course, for
+      example "Gr 5 question banks", which is never archived;
+    - its members are that year's teachers of the level, as teacher, and the
+      people who crop, as in_charge. Its banks still sit in teacher-only
+      folders (§2.2), so a student let in by mistake sees none of them;
+    - crops stay with the file, so they carry over to next year by
+      themselves. Nothing is uploaded or cropped again for a new year.
+
+    **Each new year, that course's in_charge updates its teachers** on its
+    People page: the year's new teachers of the level ask to join from
+    Courses or are added on that page, and those who no longer teach the
+    level are removed. An admin is needed only when the people who crop change, because
+    only an admin can add or remove an in_charge. Nothing else changes, and no
+    schema change is needed. Everyone sees the course in Courses, students
+    included. A student's request to join is declined, and a student approved
+    by mistake sees no bank (§2.2). Worksheets are made from that course, so
+    their file name carries its code (§6.5). A re-upload is still a new file
+    whose crops start again (§8.3).
+11. **Every crop is a 300 dpi picture.** *"Mostly banks have answers
+    separately."* Mostly is not always: some banks print answers on the pages
+    their questions are on. A vector crop hides the rest of its source page
+    but does not remove it (in testing, `pdftotext` printed every question on
+    the source page), so a vector crop from such a page would carry its
+    answers to anyone the worksheet reaches, a parent it is emailed to
+    included. So every crop, from every bank, digital or scanned, is rendered
+    by pdf.js at 300 dpi and re-encoded as JPEG (§6.3). This replaces "vector
+    stays vector" (item 5) without waiting for the sample banks, and leaves
+    one way to draw a crop instead of three (`renderRegion`, §4.5).
+
+    *Rejected:* a per-bank "answers are separate" switch that gives that
+    bank sharp vector crops. It is a promise about every page of a bank, made
+    once by whoever uploads it and checked by nothing, and one wrong setting
+    sends hidden answers out with every crop from that bank, with nothing on
+    the page to show it. At 300 dpi a crop already prints as sharp as the
+    page needs.
+12. **One fixed topic list per course.** *"Yes one fixed topic list"*, and
+    *"Per course is good"*. With item 10 that is one list per level, in its
+    bank-holding course, because students run from K1 to Uni
+    (`lib/options.ts` `GRADES`) and one centre-wide list would be either too
+    coarse or show a Gr 2 picker A-level topics. The owner sends each list
+    before the build. It goes in with a one-off snippet in `DEPLOYMENT.md`
+    (§3.4), never with the migration, so re-running the migration cannot bring
+    a deleted topic back. There is no topic screen; a change is made in the
+    SQL editor. Until a course has topics, its topic pickers stay hidden.
+13. **A crop is deleted outright, with no Trash.** *"Yes no need for trash."*
+    In-charges and admins delete crops outright. A crop is only a box on a
+    page:
+    - the PDF itself is untouched;
+    - redrawing a box takes seconds;
+    - nothing else points at a crop, because worksheets are not saved.
+
+    The rule "nobody hard-deletes" still holds for files and folders (§3.4).
+14. **Any bank may be cropped, including one a publisher has locked.** *"No
+    let us crop any banks."* Some PDFs open without a password but are locked
+    against printing or copying, and that lock usually states a publisher's
+    terms. The plan recommended cropping only banks the centre owns or is
+    licensed to adapt, and refusing locked ones. **The owner has decided
+    otherwise: a locked bank is cropped like any other.** pdf.js opens it and
+    draws its crops (§6.3), nothing reads a PDF's permissions, and the
+    worksheet comes out unlocked. In testing, a bank locked against printing,
+    copying and changes (AES-256) gave an unencrypted worksheet holding only
+    its crops. A PDF that needs a password just to open is still refused,
+    because it cannot be read without one (§4.3).
+
+    This decision is about licensing only. Who sees crops is still §2.2's
+    rule that only teacher-only banks can be cropped, which it does not
+    change.
 
 ### 2.2 Defaults this plan takes (say if any is wrong)
 
@@ -138,68 +215,8 @@ cannot use.
 
 ### 2.3 Open questions for the owner
 
-1. **Is any bank used by more than one course, or kept for next year?**
-   Decide this before PR 1. Crops belong to one file, a file belongs to one
-   course, and the portal cannot share or copy a file across courses. So
-   without an answer, the same bank is uploaded and cropped again for each
-   sibling class at one level, and again for next year's course once this one
-   is archived (`courses.archived_at`).
-   *Recommendation, if yes: keep each level's banks in one bank-holding course*
-   (for example "Gr 5 question banks"), enrol the teachers of the sibling
-   courses there as teachers, and the people who crop as in_charge. That needs
-   no schema change. Worksheets are then
-   made from that course, and the file name carries that course's code
-   (§6.5). A re-upload is still a new file whose crops start again (§8.3).
-2. **Do any banks print answers on question pages?** A vector crop hides the
-   rest of its source page but does not remove it. In testing, `pdftotext`
-   printed every question on the source page. Hidden questions are harmless.
-   Hidden answers are not. This is decided on the sample banks (§9.2 step 1):
-   - **No sample prints answers on question pages:** crops stay vector, as
-     decided.
-   - **Any sample does:** crops become pictures rendered at 300 dpi, for every
-     bank. *Recommendation: every bank*, because a decision made on three or
-     four samples would otherwise have to hold for every future bank. The
-     owner may prefer to rasterise only the banks that print answers.
-
-   Either way, rollout step 6 tells in-charges that a bank with answers on its
-   pages goes in as a separate, answers-free file. That instruction is a habit
-   nothing enforces, which is why raster crops stay the rule once the samples
-   show the risk is real. Rasterising is one switch in
-   compose, using the raster path that already exists (§6.3). Whatever Pencil
-   does with an imported PDF (§9.2 step 1), the downloaded file is still the
-   teacher's, and it can be emailed or sent on WhatsApp to a parent. So
-   Pencil's behaviour cannot settle this question.
-3. **The topic list.**
-   *Recommendation: one list per course*, in your order, because students run
-   from K1 to Uni (`lib/options.ts` `GRADES`) and one centre-wide list is
-   either too coarse or shows a Gr 2 picker A-level topics. With bank-holding
-   courses (question 1) that is one list per level. Send the lists before the
-   build. They go in with a one-off snippet in `DEPLOYMENT.md` (§3.4), never
-   with the migration, so re-running the migration cannot bring a deleted
-   topic back. Until someone asks for a screen, changes are made in the SQL
-   editor. Until a course has topics, its topic pickers stay hidden.
-4. **Deleting a crop.**
-   *Recommendation: in-charges and admins delete crops outright, with no
-   Trash.* A crop is only a box on a page:
-   - the PDF itself is untouched;
-   - redrawing a box takes seconds;
-   - nothing else points at a crop, because worksheets are not saved.
-
-   The rule "nobody hard-deletes" still holds for files and folders.
-5. **Banks locked by a publisher.** Some PDFs open without a password but are
-   locked against printing or copying. That lock usually states a publisher's
-   terms. Compose opens such files (pdf.js always does, and so does the pdf-lib
-   fork this plan uses, §6.4) and writes their crops out unlocked. Tested on a
-   bank locked against printing, copying
-   and changes (AES-256): the worksheet came out unencrypted, with its text
-   intact. Whether the centre may do that is a licensing question, not a
-   technical one.
-   *Recommendation: crop only banks the centre owns or is licensed to adapt.*
-   If the answer is no, a locked bank is refused at the crop screen and at
-   compose with "bank.pdf is locked by its publisher against copying or
-   printing. It can't be used for worksheets." pdf.js reports the lock
-   (`getPermissions()` returns the allowed set, and the test bank's was
-   empty). A PDF that needs a password just to open is refused either way.
+None. The five this plan asked were answered on 2026-10-17, and are §2.1,
+items 10–14.
 
 ## 3. Data model
 
@@ -261,6 +278,8 @@ purge needs no change.
   500 on the first failure (`app/api/cron/purge/route.ts:49-55`,
   `supabase/functions/purge/index.ts`), so all later purging would stop. With
   cascade, neither purge copy changes.
+- **A crop is deleted.** Its row goes at once. There is no Trash for crops
+  (§2.1 item 13).
 - **A topic is deleted.** Its questions' `topic_id` becomes null. A course
   deleted takes its topics with it.
 - **The bank's bytes are assumed never to change.** A crop is a page and a box
@@ -282,9 +301,9 @@ pastes SQL by hand. Append it to `supabase/schema.sql` under
 `-- >>> 20261017000009_questions.sql`.
 
 ```sql
--- Topics: one list per course, in the owner's order. Rows are added in the SQL
--- editor (DEPLOYMENT.md), never by this migration, so re-running it never
--- touches them.
+-- Topics: one fixed list per course, in the owner's order. Rows are added in
+-- the SQL editor (DEPLOYMENT.md), never by this migration, so re-running it
+-- never touches them.
 create table if not exists public.question_topics (
   id        uuid primary key default gen_random_uuid(),
   course_id uuid not null references public.courses(id) on delete cascade,
@@ -299,8 +318,8 @@ create table if not exists public.questions (
   file_id    uuid not null references public.files(id) on delete cascade,
   page       integer not null check (page >= 1),
   -- PDF user-space points on the source page, before its /Rotate, CropBox
-  -- offset included: what pdf.js convertToPdfPoint returns, what pdf-lib
-  -- embedPages takes. y grows upwards.
+  -- offset included: what pdf.js convertToPdfPoint returns, and what
+  -- convertToViewportPoint takes to render the box. y grows upwards.
   x0 real not null, y0 real not null, x1 real not null, y1 real not null,
   -- Reading order on its page (columns left to right, then top to bottom),
   -- set by the crop screen every time the page is saved.
@@ -381,6 +400,7 @@ create policy questions_update on public.questions for update
   using (public.can_crop_file(file_id))
   with check (public.can_crop_file(file_id) and public.topic_fits(topic_id, file_id));
 
+-- A crop is deleted outright, with no Trash: the bank itself is untouched.
 drop policy if exists questions_delete on public.questions;
 create policy questions_delete on public.questions for delete
   to authenticated
@@ -462,7 +482,8 @@ Make these hand edits in the same PR:
 - `DEPLOYMENT.md` §2:
   - add `question_topics` and `questions` to the "Verify" table list, plus a
     line saying "already deployed? run just this file";
-  - add the topic snippet, run once per course from the owner's list:
+  - add the topic snippet, run once per bank-holding course from the
+    owner's list (§2.1 item 12):
 
     ```sql
     insert into public.question_topics (course_id, name, position) values
@@ -472,7 +493,8 @@ Make these hand edits in the same PR:
   - add two rows to the permission matrix: *Crop questions*
     (in_charge, admin) and *Pick questions, download a worksheet* (teacher,
     in_charge, admin);
-  - change "Nobody can hard-delete" to say that it covers files and folders.
+  - change "Nobody can hard-delete" to say that it covers files and folders,
+    and that a crop is deleted outright (§2.1 item 13).
 
 ### 3.5 How the app reads it
 
@@ -498,6 +520,12 @@ course among 30,000:
 | One bank's crops, ordered (125 rows) | 5 ms |
 | 20 picks by id | 5 ms |
 | Saving one page with 12 new crops (as in-charge) | 5 ms |
+| `question_sources` for a course of 25,200 crops (12 banks), among 201,600 | 34–60 ms |
+| One 2,100-crop bank, ordered, per range request of 1,000 (3 requests) | 4–8 ms |
+
+The last two rows were seeded separately, as a level's bank-holding course
+after some years (§8.1): 8 courses, each of 12 banks of 300 pages with 7 crops
+a page.
 
 The policies call `is_admin()` once per query, as `(select public.is_admin())`.
 These are floors, not production numbers: the shim's `auth.uid()` is simpler
@@ -554,6 +582,9 @@ Results:
   cleared by the in-charge): teachers still saw its 2 crops,
   `question_sources` reported `eff_teacher_only = false`, `can_crop_file` was
   false, and deleting a crop removed 0 rows.
+
+The owner's answers (§2.1, items 10–14) changed only comments in the
+migration. It was re-run after them, with the same results.
 
 The shim, which PR 1 commits as `supabase/tests/shim.sql`:
 
@@ -644,11 +675,12 @@ The picks bar (§4.4) shows here too while there are picks.
 
 **States.**
 
-- **Empty, managers:** "Nothing cropped yet. Open a bank PDF and choose *Crop
-  questions* from its menu. Crops of a bank in Trash come back when it is
-  restored."
-- **Empty, teachers:** "Nothing cropped yet. Ask your course in-charge to crop
-  a bank."
+- **Empty, managers:** "Nothing cropped in this course. Banks kept for next
+  year are cropped in the level's question-bank course: open a bank PDF there
+  and choose *Crop questions* from its menu. Crops of a bank in Trash come
+  back when it is restored."
+- **Empty, teachers:** "Nothing cropped in this course. Question banks are
+  kept in each level's question-bank course, in your course list."
 
 **Why there is no list of every crop.** The first draft listed crops as
 thumbnails across all banks, 50 a page, with source and topic filters. Every
@@ -760,10 +792,10 @@ this tab yet.
   - "Not found or not permitted." (from `getViewUrl`);
   - "The download failed. Try again.";
   - "This PDF needs a password to open. Upload an unlocked copy.";
-  - "This file isn't a readable PDF." (pdf.js `InvalidPDFException`);
-  - if the owner says no to locked banks (§2.3 question 5): "bank.pdf is
-    locked by its publisher against copying or printing. It can't be used for
-    worksheets."
+  - "This file isn't a readable PDF." (pdf.js `InvalidPDFException`).
+
+  A bank locked by its publisher against printing or copying is not an
+  error: it opens like any other (§2.1 item 14).
 - **A bank students can see** (managers): the crop tools are off and a banner
   reads "Students can see this file. Make it teacher-only before cropping."
 - **A page with no proposals** (managers): "No suggestions on this page. Drag
@@ -792,8 +824,8 @@ and written inside `try`/`catch` so a blocked storage only means picks do not
 survive a reload. They persist across pages, banks and a visit to the
 Viewer.
 
-**Opening the modal** calls `preparePicks(courseId, ids)` once. In one action
-it:
+**Opening the modal** first calls `preparePicks(courseId, ids)` once. In one
+action it:
 
 - reads the picked rows by id, under RLS, with their file names and folders;
 - signs every bank those rows need with one `createSignedUrls(paths, 60)`
@@ -806,19 +838,28 @@ banks already open in the tab. Picks that no longer exist (a deleted crop, or
 a bank in Trash) are dropped from the picks with the line "2 picked questions
 are no longer available and were removed."
 
+Then the modal renders each pick once, to the 300 dpi JPEG that will print
+(§6.3 steps 1–2), in bank order, with `page.cleanup()` after each page's last
+pick (§4.5), and shows that JPEG, scaled by CSS, as the pick's thumbnail. What
+the teacher checks is the picture that prints. *Download PDF* only places the
+held JPEGs on the template pages and saves. Removing a pick drops its JPEG.
+
 **`components/questions/WorksheetModal.tsx`** is a `Modal` 560 px wide. It
 contains:
 
 - the picks in bank order (bank by folder path and name, then page, then
-  position), each with a small crop, its meta line ("Fractions.pdf · p. 4 ·
+  position), each with its picture, its meta line ("Fractions.pdf · p. 4 ·
   Fractions") and remove ×;
 - **Label:** *Lesson* | *Homework*, default Homework;
-- *Download PDF* (primary).
+- *Download PDF* (primary), enabled once every pick is drawn.
 
-**While composing**, the button shows a spinner and progress text such as
-"Fetching bank.pdf (2 of 3)…" and then "Building 12 pages…".
+**While the modal opens**, it shows a spinner and progress text such as
+"Fetching bank.pdf (2 of 3)…" and then "Drawing question 4 of 12…". Drawing
+took 0.6–1.0 s for 16 questions from a digital bank and 9.5–12 s for 20
+questions from 20 different pages of a 300 ppi colour scan, in Node, and is
+slower on an iPad (§6.4).
 
-**When it is done:**
+**When *Download PDF* is done:**
 
 - the browser downloads the file (§6.5);
 - a toast says "Downloaded … · 2.1 MB";
@@ -827,8 +868,8 @@ contains:
   threshold is Pencil Files' limit until §9.2 step 1 measures the drag-in
   limit.
 
-**On failure**, no PDF is made, and the error names the bank, e.g. "bank.pdf
-could not be read: …".
+**On failure** to fetch or draw from a bank, no PDF is made, and the error
+names the bank, e.g. "bank.pdf could not be read: …".
 
 ### 4.5 Shared code
 
@@ -840,13 +881,25 @@ the Next docs say for client-only libraries (`02-guides/lazy-loading.md`).
 - `openBank(fileId, url)` fetches the whole file (`fetch(url).arrayBuffer()`)
   and opens it with pdf.js. One `PDFDocumentProxy` per bank per tab.
 - pdf.js transfers the bytes it is given to its worker, which leaves the
-  caller's copy empty. The tab keeps no second copy: compose asks the proxy
-  for the bytes (`getData()`) only for banks with vector crops, and drops them
-  after.
+  caller's copy empty. The tab keeps no second copy, and needs none: pdf.js
+  is the only thing that reads a bank, for the page view, the AI render and
+  the worksheet modal alike (§6.3).
+- `renderRegion(page, box, scale, canvas)` is the only caller of
+  `page.render`. The page view, the AI render and the modal all use it, with
+  pdf.js's defaults: `intent: "display"` and the default `annotationMode`.
 - The tab keeps up to 100 MB of banks open, each counted at its file size
   (the worker's copy). The least recently used bank is closed with
-  `destroy()` first. The bank on screen is never closed, so a single bank over
-  the budget still opens.
+  `destroy()` first. The bank on screen, and every bank the worksheet modal
+  needs while it is open, are never closed. A single bank over the budget
+  still opens, and a worksheet from several big banks never loses one
+  halfway, after its 60-second URL (§4.4) has expired. The budget applies
+  again when the modal closes.
+- Every caller that renders a page calls `page.cleanup()` when it is done
+  with it: the page view when it leaves a page, the AI render after encoding,
+  and the modal after the last pick on each page (picks are in bank order, so
+  a page's picks are consecutive). Without it pdf.js keeps every decoded page
+  for the life of the bank: 1.2 GB after 40 pages of a 300 ppi colour scan,
+  against about 285 MB with it.
 - pdf.js setup:
   - **build:** the legacy build, `pdfjs-dist/legacy/build/pdf.mjs`;
   - **worker:** `new URL("pdfjs-dist/legacy/build/pdf.worker.min.mjs",
@@ -858,19 +911,18 @@ the Next docs say for client-only libraries (`02-guides/lazy-loading.md`).
 
 **`lib/worksheet/propose.ts`** holds the §5 logic as pure functions: what
 kind of page it is, text-layer proposals, ink extents, snapping AI results,
-and reading order (`pos`). Compose uses its page-kind function too, so a page
-is "scanned" by one rule everywhere.
+and reading order (`pos`). Compose does not need the kind of page, because
+it draws every crop the same way (§6.3).
 
-**`lib/worksheet/compose.ts`** builds the output PDF (§6), using pdf.js and
-`@cantoo/pdf-lib`.
+**`lib/worksheet/compose.ts`** builds the output PDF (§6) in two steps:
+`drawPick` renders one crop to its 300 dpi JPEG through `renderRegion` when
+the modal opens (§4.4), and `save` places the held JPEGs on the template
+pages with `pdf-lib`.
 
 **`lib/worksheet/ai.ts`** (server only) reads `ANTHROPIC_API_KEY`,
 `ANTHROPIC_MODEL` and `ANTHROPIC_EFFORT`. `aiConfig()` returns the
 configuration, or null when it is not set up (§5.2). The page view and the
 route both ask it, so "is AI on" is written once.
-
-**`components/questions/CropThumb.tsx`** renders one crop from an open bank,
-for the modal.
 
 ### 4.6 Everything touched
 
@@ -878,7 +930,7 @@ for the modal.
 
 - the two pages and the route (§4.2, §4.3, §5.2);
 - `app/actions/questions.ts`;
-- `components/questions/{QuestionsView,PageView,WorksheetModal,CropThumb}.tsx`;
+- `components/questions/{QuestionsView,PageView,WorksheetModal}.tsx`;
 - the four `lib/worksheet` files;
 - `public/worksheet/template-lesson.pdf` and `template-homework.pdf` (§6.1);
 - `scripts/copy-pdfjs-assets.mjs`;
@@ -895,8 +947,8 @@ for the modal.
   every `.wasm`, `.bcmap`, `.pfb`, `.icc` and template request costs a
   Supabase `getUser()` round trip.
 - `package.json`:
-  - new dependencies: `pdfjs-dist` 6.4.299, `@cantoo/pdf-lib` 2.11.1, and
-    later `@anthropic-ai/sdk` and `zod`;
+  - new dependencies: `pdfjs-dist` 6.4.299, `pdf-lib` 1.17.1, and later
+    `@anthropic-ai/sdk` and `zod`;
   - a `postinstall` that copies
     `node_modules/pdfjs-dist/{wasm,cmaps,standard_fonts,iccs}` into
     `public/pdfjs/`, so they always match the worker's version;
@@ -1141,9 +1193,11 @@ top. Nothing of the template is redrawn.
   and width.
 - **Compose draws no text,** so no font is embedded and no typed text can
   reach a page.
-- **Tested** with `@cantoo/pdf-lib`: two pages with the Homework template as
-  background and a vector crop on top came out 594.96 × 841.92 pt, with the
-  template's Inter Type 3 fonts carried through.
+- **Tested** with `pdf-lib` 1.17.1: eight pages with the Homework template
+  as background and 16 picture crops on top came out 594.96 × 841.92 pt, with
+  the template's Inter Type 3 fonts carried through. Those are the
+  worksheet's only fonts, and `pdftotext` on it printed only the template's
+  words, "HOMEWORK" and "MathVision".
 
 ### 6.2 Placing crops
 
@@ -1158,74 +1212,94 @@ top. Nothing of the template is redrawn.
     content area's vertical midpoint;
   - any other question gets a page of its own.
   - Picks keep bank order (§2.2).
-- **Rotation.** pdf-lib ignores a source page's `/Rotate`, so the crop is
-  drawn with `rotate: degrees(-r)`. With W×H as the displayed size, the
-  anchor for r = 0, 90, 180 and 270 is (x, top−H), (x, top), (x+W, top) and
-  (x+W, top−H). This was tested on a `/Rotate 90` page.
+- **Rotation.** Crop sizes here are the displayed size, after the source
+  page's `/Rotate`. pdf.js renders the page as displayed, so the picture is
+  already upright and is drawn with no rotation. Tested on a `/Rotate 90`
+  page: the picture came out in the shape the page view shows.
 
-### 6.3 Three ways a crop is drawn
+### 6.3 Every crop is a picture of its box
 
-1. **Vector (digital pages, the default).** One `embedPages(pages, boxes)`
-   call per source document, holding every vector crop from it. The box is
-   the stored PDF-space box.
-   - The crop becomes a clipped Form XObject. Vector text and drawings stay
-     vector, and fonts carry through.
-   - One call per source shares fonts and images.
-   - **Always pass the box.** pdf-lib's default box ignores a non-zero
-     MediaBox origin.
-   - The page is clipped, not cleaned: the rest of the source page travels
-     hidden (§2.3 question 2).
-2. **Scanned pages: the box's own pixels.** pdf.js renders the box at the
-   scan's own density (the image's pixel width ÷ its width on the page,
-   capped at 300 dpi), the canvas is cut to the box, re-encoded as JPEG at
-   quality 0.9 and embedded with `embedJpg`.
-   - One generation of loss, and no visible change.
-   - Only the box goes into the worksheet, so the rest of the scanned page
-     never leaves the bank. The owner asked for vector-sharp crops where the
-     source is vector; a scan was never vector.
-   - Tested on a 203 ppi scan: three crops came to 284 KB, each image holding
-     only its box (1453×564, 1453×592, 1453×592 px), against 364 KB for
-     `embedPages`, which carried the whole page image.
-   - A page is "scanned" by the same function as §5.1.
-3. **Raster at 300 dpi (PNG), for what pdf-lib would draw wrongly.** A crop
-   takes this path when its source document has optional content that is off
-   by default (pdf.js `getOptionalContentConfig()`), or its page has any
-   annotation other than a link (`getAnnotations()`). Why:
-   - The new document has no `/OCProperties`, so a hidden layer becomes
-     visible. In the review's test, a teacher edition with an "Answers" layer
-     off by default showed only "QUESTION 1" in pdf.js and poppler, and
-     "ANSWER 42" in the worksheet.
-   - `PDFPageEmbedder` copies only a page's `Contents` and `Resources`
-     (`src/core/embedders/PDFPageEmbedder.ts`), so stamps, FreeText and
-     filled form fields are dropped.
-   - pdf.js honours the default layer state and draws annotations, so its
-     render is what the in-charge saw while cropping and what the teacher saw
-     while picking.
+Every crop, from every bank, digital or scanned, is drawn the same way
+(§2.1 item 11), once, when the worksheet modal opens (§4.4):
 
-   If §2.3 question 2 makes raster crops the rule, every crop from a digital
-   page takes this path too.
+1. **pdf.js renders the box alone,** at 300 dpi of the size it is printed on
+   the worksheet: §6.2's scale × 300 ÷ 72. The box's corners come from the
+   stored PDF-space box through `convertToViewportPoint`. The viewport's
+   `offsetX` and `offsetY` put the box's top-left corner at the canvas
+   origin, and the canvas is the box's size at that scale.
+2. **The canvas is encoded as JPEG** at quality 0.9 (`canvas.toBlob`). The
+   modal holds it, and *Download PDF* embeds it with `embedJpg`, which copies
+   the bytes unchanged.
+3. **One canvas serves every crop,** and is set to 0 × 0 once the last pick
+   is drawn, because Safari is slow to free canvas memory.
 
-**Memory.** Sources are processed one at a time. pdf-lib loads a source only
-for its vector crops, from `getData()` (§4.5), and needs about 2.2× the file
-size. Scanned banks, the big ones, never go through pdf-lib.
+What this keeps out, and what it keeps:
+
+- Only the box's pixels reach the worksheet. No text, font, layer or image of
+  the source page goes with them, so nothing hidden can be extracted from a
+  crop. In testing, `pdftotext` on a worksheet printed only the template's
+  words (§6.1).
+- pdf.js draws the box as the page view drew it, so the worksheet shows what
+  the in-charge cropped and the teacher picked. Every render goes through
+  `renderRegion` with the display intent (§4.5), never `intent: "print"`,
+  which turns on a layer that a teacher edition hides on screen but prints.
+  In testing, a crop from a bank whose Answers layer is off for viewing and
+  on for printing came out without the answers with the display intent, and
+  with them with `intent: "print"`.
+
+Two choices, measured in Node 22 with pdfjs-dist 6.4.299 on `@napi-rs/canvas`
+1.0.11 (Skia, the graphics library Chrome uses), on the test banks that
+`docs/worksheets/raster/make-banks.py` writes (four digital pages, and the same
+pages as a noisy 200 ppi scan):
+
+- **JPEG for every crop, not PNG.** PNG was a little smaller on clean digital
+  crops (80 KB against 95 KB), but 2.4 times bigger on scans (581 KB against
+  239 KB), and pdf-lib re-compresses a PNG in JavaScript: 16 crops from the
+  digital bank took 4.4 s to compose against 0.6 s. Viewed pixel for pixel,
+  the two looked the same on text.
+- **Scans at 300 dpi too.** A 200 ppi scan is upsampled, which adds bytes but
+  no detail: capped at the scan's own density, its crops were 111 KB against
+  239 KB. That cap would have compose measure each scanned page's density.
+  One rule for every page is simpler, and worksheets stay far under 25 MB
+  (§8.1).
+
+**Memory.** pdf-lib never reads a bank; it loads only the 26 KB template.
+Beyond the picked banks, which stay open while the modal is (§4.5), the modal
+holds one canvas, the decoded images of the page it is drawing from (released
+by `page.cleanup()` after that page's last pick), the held JPEGs (about 4 MB
+for 20 picks from a scan), and, on *Download PDF*, the saved file. 20 picks
+from 20 pages of a 300 ppi colour scan peaked at about 310 MB in Node with
+the cleanup and about 750 MB without it. The largest canvas is the largest
+crop the content area allows, 180 × 136 mm at 300 dpi: 2126 × 1605 px, or
+13 MB of pixels, about a fifth of the 4096 × 4096 that iOS Safari allows one
+canvas.
 
 ### 6.4 Where it runs, and why
 
 The PDF is built **in the teacher's browser**.
 
-- **Speed:** building took 7–73 ms in testing. Loading a 54 MB, 200-page scan
-  into pdf-lib took 36 ms (and with §6.3 a scan no longer needs to be loaded
-  into pdf-lib at all).
+- **Speed:** 16 questions from a digital bank took 0.6–1.0 s, template and
+  save included. From scans, a crop costs about 0.5 s when it is the first
+  pick on its page, because pdf.js decodes the whole page image to draw any
+  part of it, and about 0.1 s after that. 20 picks from 20 pages of a
+  300 ppi colour scan took 9.5–12 s, and 20 from 5 pages took 4–5 s (Node,
+  4-core container, §6.3). An iPad is slower, so the modal counts the
+  questions as it draws them (§4.4), and §9.2 step 1 times a worksheet on
+  one.
 - **What a server version would cost:**
-  - Vercel caps every function request and response at **4.5 MB**, and a
-    worksheet cut from scans can be larger;
+  - Vercel caps every function request and response at **4.5 MB**, and 20
+    questions from a scan come to about 5 MB (§8.1);
   - getting around that means writing the worksheet to Storage. That needs
     a new storage policy so teachers can write, and it leaves PDF blobs that
-    the purge never removes.
+    the purge never removes;
+  - every crop is rendered, so the function would need a native canvas
+    (`@napi-rs/canvas`, as in the measurement) and would download each
+    picked bank itself, with 9.5–12 s of rendering for 20 scanned picks
+    inside the 60 s `maxDuration`.
 
 **What it costs in the browser, decided:** every bank is downloaded whole,
-before its first page shows, both to browse it and to compose from it. pdf-lib
-cannot load part of a file, and a signed URL changes every time, so the
+before its first page shows, both to browse it and to compose from it. pdf.js
+is given the bytes (§4.5), and a signed URL changes every time, so the
 browser cache never helps. A bank stays open for the tab (§4.5).
 
 - A 54 MB scan takes about 9 s at 50 Mbps and about 45 s on 10 Mbps home
@@ -1236,29 +1310,41 @@ browser cache never helps. A bank stays open for the tab (§4.5).
   bank shows in under 10 s on an iPad on home Wi-Fi. At 10 Mbps a bank over
   about 12 MB cannot meet it, so the sample banks' sizes already predict the
   answer.
-- **If it fails, the fallback** is a small preview image per crop, rendered
-  at save time on the in-charge's machine, which already has the page
-  rendered, and stored in Storage. Teachers would then pick from the previews
-  and download a bank only to compose from it. That needs the Storage write, the
-  new policy and purge handling this plan otherwise avoids.
+- **If it fails, the fallback** stores each crop's own picture: the 300 dpi
+  JPEG of §6.3, which depends only on the crop's box (§6.2). The in-charge's
+  machine renders it once when the page is saved, and stores it at
+  `courses/{course}/{file}/{question}.jpg`. Teachers then pick from these
+  pictures and compose from them, and never download a bank. It needs:
+  - `image/jpeg` added to the bucket's allowed types, which today are
+    `application/pdf` only (`20260611000005_storage.sql`);
+  - a signing action that selects the `questions` rows under RLS (the
+    `getViewUrl` pattern);
+  - deleting a crop's picture with the crop and with the purge. Clients
+    have no delete policy on this bucket, so that is a new policy or a
+    service-role step;
+  - Storage for every crop: at 95–239 KB each, a level's 25,200 crops
+    (§8.1) are about 2.4–6 GB.
+
+  The in-charge's write is already allowed by `course_materials_insert`.
 - **Worth trying before that fallback:** pdf.js can read only the byte ranges
   a page needs when it is given the URL instead of the bytes (with
   `disableAutoFetch` and `disableStream`). Whether Supabase's signed URLs
   answer range requests from the app's origin, and how that fits a URL that
-  expires after 60 seconds, has not been tried.
+  expires after 60 seconds, has not been tried. pdf.js is the only reader of
+  a bank (§6.3), so this would serve the modal as well as the page view.
 
-Move composing to a route only if real scanned banks are routinely over about
-50 MB, or teachers are on weak connections.
+Big banks and weak connections are what the fallback above is for: it takes
+the bank download out of the teacher's browser for picking as well as for
+composing, where a server compose would take it out of composing only. So
+this plan builds no server compose (§9.3).
 
-**Library:** `@cantoo/pdf-lib` 2.11.1 (MIT), a maintained fork of `pdf-lib`.
-The original has not been maintained since 2021.
-
-- The original also refuses encrypted files outright. The fork opens
-  owner-password banks with `load(bytes, { password: "" })`, which only
-  matters if §2.3 question 5 says yes.
-- The same compose test produced the same output with the fork as with the
-  original (372 KB against 371 KB, with the same saving from sharing).
-- pdf.js already opens such files, so the page view needs no special case.
+**Library:** `pdf-lib` 1.17.1 (MIT). It only embeds the template and the
+JPEGs the modal made, never a bank, so its lack of releases since 2021 costs
+nothing here. The maintained fork `@cantoo/pdf-lib` adds SVG and HTML parsers
+this plan does not use. Tested: the same worksheet as the fork, 1,547 KB
+against 1,548 KB. pdf.js is the only thing that opens a bank, and it opens
+one locked by its publisher (§2.1 item 14), so neither the page view nor
+compose has a special case for locked banks.
 
 ### 6.5 File name
 
@@ -1269,7 +1355,8 @@ The pattern is `MathVision {Label} {course code, else course name}
 - The time keeps two worksheets made the same day, for different children,
   from getting the same name, which is how a worksheet reaches the wrong
   child. No child's name goes in it.
-- With a bank-holding course (§2.3 question 1), the code is that course's.
+- Worksheets are made in a level's bank-holding course (§2.1 item 10), so
+  the code is that course's.
 - Characters other than letters, digits, spaces, hyphens and brackets are
   dropped.
 - The PDF's Title is the same name, without `.pdf`.
@@ -1280,14 +1367,16 @@ Pencil has no boards API or files API, so the portal pushes nothing. The
 teacher:
 
 1. downloads the worksheet (§4.4);
-2. opens the child's Space for that course;
+2. opens the child's Space for the class the worksheet is for, not the
+   bank-holding course it was made in, which has no students (§2.1 item 10);
 3. drags the PDF onto the canvas, or uses Upload → PDF;
 4. chooses **one page per board**.
 
 Each page becomes its own board, and each page is the template's own page
 with the crop on top, so the new boards match the template's boards. Pencil's
-PDF import takes up to 1,000 pages. What Pencil does with the file after the
-import is checked in §9.2 step 1.
+PDF import takes up to 1,000 pages. Pencil's own size limit for a drag-in,
+how it names the boards, and whether a Space has a board limit are checked in
+§9.2 step 1.
 
 ## 8. Volume, limits, security, failure modes
 
@@ -1297,25 +1386,39 @@ The owner has not given volumes. The design handles the following:
 
 - **Banks:**
   - digital banks are typically a few MB;
-  - the scanned test bank was 200 pages and 54 MB;
+  - the largest scanned bank tried (for download time, §6.4) was 200 pages
+    and 54 MB. A 300 ppi colour scan measured 0.87 MB a page, so a 200-page
+    bank is about 170 MB;
   - on the Supabase Free plan no upload can exceed 50 MB, and on Pro the
     global limit can be raised to 500 GB. The bucket sets no limit of its own
     (`file_size_limit` is null in `20260611000005_storage.sql`), so the
     project's global limit applies. §9.2 step 1 checks the plan. On Free, an
     in-charge splits a bigger scan before uploading it, by chapter or
     section, and each part is its own bank.
-- **Crops:** many per page, about 4 to 12. A 100-page bank holds roughly 400
-  to 1,200 questions, and a course a few thousand. The reads measured in §3.5
-  take 5–11 ms locally at 5,000 crops in a course. That is a floor, repeated
-  on Supabase before anyone relies on it.
+- **Crops:** many per page, about 4 to 12. A 300-page bank holds about 1,200
+  to 3,600 questions. A level's bank-holding course keeps every bank of the
+  level for good (§2.1 item 10), so it holds tens of thousands: 12 banks of
+  300 pages at 7 a page is 25,200. The reads measured in §3.5 take 34–60 ms
+  for the Questions page at that size, and 4–8 ms for each 1,000-row range of
+  one bank's crops; a 2,100-crop bank takes 3 ranges. Those are floors,
+  repeated on Supabase before anyone relies on them.
 - **Storage egress.** Every bank opened downloads the whole bank, in every
   tab. Egress per month is roughly bank opens × average bank size. For
   example, 10 teachers each opening 3 banks a working day, 22 days a month:
   about 6.6 GB at 10 MB a bank, and about 33 GB at 50 MB. Compare that with
   the plan's included egress (Supabase dashboard → Usage) once step 1 knows the
   real sizes.
-- **Worksheet:** usually 5 to 20 questions from 1 to 4 banks.
-- **Rendering a page** took 58–81 ms at 144 dpi.
+- **Worksheet:** usually 5 to 20 questions from 1 to 4 banks. Every question
+  is a picture (§6.3): about 95 KB from a digital page and 239 KB from the
+  4-page, 200 ppi test scan of §6.3, so 20 questions are about 2 MB, or 5 MB
+  from scans. A 300 ppi colour scan's crops averaged 198 KB, and its largest
+  510 KB. The largest crop the page allows was 219 KB from a digital page and
+  586 KB from the grey scan, so even 40 of those stay under 25 MB.
+- **The tab, while the modal is open,** holds every picked bank (§4.5): with
+  1 to 4 banks, up to 4 × the largest bank.
+- **Rendering a page** for the page view at 2048 px wide took 20–86 ms from a
+  digital page and about 0.5 s (up to 1.4 s) from a 300 ppi colour scan, most
+  of it spent decoding the scan.
 
 ### 8.2 Security
 
@@ -1334,8 +1437,9 @@ The owner has not given volumes. The design handles the following:
   - The key is server-only. The body is capped. Nothing is stored.
   - The page image goes to Anthropic (§2.1 item 9).
 - **Worksheet:** it is built in the teacher's browser and never uploaded.
-  Vector crops carry the hidden rest of their page (§2.3 question 2). Scanned
-  crops carry only their box.
+  Every crop is a picture of its box alone (§6.3), so the file carries
+  nothing of a bank beyond the questions picked, wherever it is sent. It is
+  never locked, whatever lock the bank had (§2.1 item 14).
 
 ### 8.3 Failure modes
 
@@ -1347,8 +1451,7 @@ The owner has not given volumes. The design handles the following:
 | An iPad or school Chromebook running an older browser | The modern pdf.js build crashes (`getOrInsertComputed`). Use the legacy build. |
 | A PDF that needs a password to open | Refused, with a message. |
 | A file that is not a readable PDF | "This file isn't a readable PDF." |
-| A bank locked by its publisher | Depends on §2.3 question 5: cropped as normal, or refused by name. |
-| A bank with a layer hidden by default, or with annotations | Those crops are rendered by pdf.js at 300 dpi (§6.3), so the worksheet shows what the screen showed. |
+| A bank locked by its publisher against printing or copying | Opened and cropped like any other. Its worksheet is not locked (§2.1 item 14). |
 | A question split across columns or pages, or sharing a figure | One box per question, or up to three if §9.2 step 1 says so (§2.2). |
 | A sideways page with no `/Rotate` | Shown sideways. Fix the PDF before cropping. A re-upload is a new file, so crops do not carry over. |
 | Two in-charges crop the same page at once | Duplicates are possible; delete one (§2.2). If one changes or removes a crop the other just removed, that save is refused whole, and *Reload page* shows what is saved (§4.3). |
@@ -1402,6 +1505,9 @@ local Postgres 16. It:
   in-charge.
 - **All or nothing:** a `save_page_crops` call with one bad edit, removal or
   box writes nothing.
+- **Allowed:** an in-charge's `save_page_crops` that edits one crop and
+  removes another writes both, and the removed row is gone, with no Trash
+  (§2.1 item 13).
 - **Trash:** questions are hidden from everyone, crops are refused, and
   `can_crop_file` is false. After restore, everything is back.
 - **Student-visible bank:** teachers still read its crops,
@@ -1413,36 +1519,28 @@ local Postgres 16. It:
 **Manual checks:**
 
 - the §5.1 rules on the test banks and on 20 real pages;
-- `pdffonts` and `pdfimages -list` on a worksheet: vector crops keep their
-  fonts, and each scanned crop is one image the size of its box at the scan's
-  density;
-- a crop from a bank with an answers layer hidden by default comes out
-  without the answers;
+- `pdftotext`, `pdffonts` and `pdfimages -list` on a worksheet: the only
+  text and fonts are the template's, and each crop is one JPEG at 300 dpi of
+  its printed size;
+- a crop from a test bank whose Answers layer is off for viewing and on for
+  printing (`layered.pdf` from `docs/worksheets/raster/make-banks.py`) comes
+  out without the answers;
 - a worksheet page overlaid on the template PDF: identical by construction,
   so this checks only where the crops sit.
 
 ### 9.2 Rollout
 
-0. **The owner:**
-   - answers §2.3, question 1 before PR 1 (question 2 is settled by the
-     sample banks in step 1);
-   - sends 3 or 4 sample banks, including any publisher bank locked against
-     copying or printing, and any teacher edition with answers in a layer;
-   - sends the topic lists, per course.
+0. **The owner**, who answered the plan's questions on 2026-10-17 (§2.1,
+   items 10–14):
+   - sends 3 or 4 sample banks;
+   - sends the topic list for each level (§2.1 item 12).
 1. **Checks before any code (about a day).** Each check names what its
    answer changes.
    - **The sample banks:**
      - size per file, which predicts the §6.4 pass bar;
      - image codecs (`pdfimages -list`);
-     - encryption and its permissions (`pdfinfo` shows print and copy), for
-       §2.3 question 5;
-     - `/OCProperties` with groups off by default, and pages with `/Annots`
-       (`pdfinfo` shows neither; pypdf's `reader.trailer["/Root"]` and each
-       page's `"/Annots"` do), which tells how often §6.3's raster path runs;
      - label styles, sections that restart numbering, and column layouts,
        for §5.1;
-     - whether answers share pages with questions, which decides §2.3
-       question 2;
      - the share of questions that span a page or column break, or depend on
        a shared figure or table, which decides one box or up to three (§2.2)
        before PR 1;
@@ -1450,44 +1548,32 @@ local Postgres 16. It:
        whether "crop once" needs a trigger (§2.2).
    - **Supabase:** the plan, and the project's global file-size limit. On
      Free, scans over 50 MB are split before upload (§8.1). Then apply the
-     migration to a Supabase project with a seeded course of 5,000 crops and
-     time §3.5's reads as a teacher.
+     migration to a Supabase project with a seeded course of 25,000 crops
+     and time §3.5's reads as a teacher.
    - **Pencil**, importing a sample worksheet with one page per board:
-     1. *Does the import keep vector, or rasterise?* Kept: §6.3's vector
-        path matters on boards. Rasterised: compose is unchanged, because the
-        downloaded file still benefits, but on boards only pixels remain, so
-        the hidden rest of a vector crop's page does not reach a board.
-     2. *Signed in as a student in that Space, do the original PDF's bytes or
-        its text layer reach the student's browser?* Check in devtools
-        (Network, and the page's text). No: the hidden content stays in the
-        teachers' files. Yes: everything behind a vector crop reaches every
-        student in the Space, which is acceptable only if §2.3 question 2
-        found no answers on question pages; otherwise raster crops.
-     3. *Does a PDF dropped into a Space also land in Pencil Files, and can a
-        student see it there?* Pencil's help centre calls Files a library
-        that "you and members of your institution can access", and says files
-        can be uploaded to it while working in a Space. Whether a plain
-        drag-in lands there, and whether students count as members, is not
-        stated. If students can see it, the outcome is the same as a yes to
-        check 2.
-     4. *Does the drag-in have a size limit of its own?* Lower than 25 MB:
+     1. *Does the drag-in have a size limit of its own?* Lower than 25 MB:
         the modal warns at that size. Otherwise the warning stays at Pencil
         Files' 25 MB.
-     5. *How are the imported boards named:* by file name, by the PDF's
+     2. *How are the imported boards named:* by file name, by the PDF's
         Title, or by number? By name or Title: §6.5's name is what teachers
         see on the boards, so it stays as it is. By number: nothing to do.
-     6. *Does a Space have a board limit?* At 10–20 boards a week, a year in
+     3. *Does a Space have a board limit?* At 10–20 boards a week, a year in
         one persistent Space is hundreds of boards. If there is a limit,
         teachers remove old worksheet boards, and how often becomes a question
         for the owner.
    - **Browser:**
      - `fetch()` a `getViewUrl` URL from the app's origin (CORS has not been
        tried in this codebase);
-     - the legacy pdf.js build and `@cantoo/pdf-lib` in a Next 16.2.9
-       Turbopack production build;
+     - the legacy pdf.js build and `pdf-lib` in a Next 16.2.9 Turbopack
+       production build;
      - on a real iPad on home Wi-Fi: the first page of the largest real
        scanned bank in under 10 s (§6.4, with the fallback if it fails), then
-       a worksheet composed from it.
+       a worksheet of 20 picks on 20 different pages of it, timed, which
+       replaces §6.4's Node figures. Over 60 s: take §6.4's fallback, which
+       takes rendering out of the teacher's browser;
+     - on the iPad, flip through 40 pages of the largest real scan with
+       Safari's Web Inspector open: memory stays flat (§4.5,
+       `page.cleanup()`).
 2. **PR 1, database:**
    - the migration, in the one-box or multi-box shape step 1 chose;
    - `supabase/tests/{shim.sql,questions.sql,run.sh}`, `schema.sql`, the
@@ -1509,9 +1595,16 @@ local Postgres 16. It:
      then redeploy;
    - PR 4 adds the route and the button. If no pair reached 98%, there is no
      PR 4.
-6. **The owner** moves banks into teacher-only folders (the crop screen
-   refuses any other), and tells in-charges that a bank with answers on its
-   pages goes in as a separate, answers-free file. In-charges start cropping.
+6. **An admin** creates one bank-holding course per level (§2.1 item 10):
+   - adds that year's teachers of the level as teacher, and the people who
+     crop as in_charge;
+   - runs the topic snippet (§3.4) for it with the owner's list;
+   - uploads the banks into teacher-only folders there (the crop screen
+     refuses any other). A bank already in a class's course is uploaded again,
+     because a file cannot move between courses.
+
+   In-charges start cropping. Each new year, each bank-holding course's
+   in_charge updates its teachers, and nothing else (§2.1 item 10).
 
 ### 9.3 Out of scope
 
@@ -1566,28 +1659,42 @@ nothing applies or serves:
 - `questions.test.sql`: the probe, whose assertions are §9.1;
 - `run.sh`: applies every migration plus the draft twice, then runs the probe
   (`PGPASSWORD=postgres PGHOST=localhost PGUSER=postgres bash docs/worksheets/run.sh`);
-- `template-{lesson,homework}.pdf`, with the HTML each was printed from.
+- `template-{lesson,homework}.pdf`, with the HTML each was printed from;
+- `raster/`: `make-banks.py`, which writes the test banks (digital, the 4-page
+  200 ppi grey scan, rotated, locked, the layered bank of §6.3, and a 40-page
+  300 ppi colour scan); `compose.mjs`, the all-raster compose measured in
+  §6.3, §6.4 and §8.1, which renders through one `renderRegion`, takes a
+  `--spread` pick mode (one pick per page) and calls `page.cleanup()` after
+  each page's last pick; and `flip.mjs`, the page view's flip through a bank,
+  with and without `page.cleanup()` (§4.5, §8.1). Each file's header says how
+  to run it.
 
-PR 1 moves them to their real paths: the migration into `supabase/migrations/`
-under a fresh version, `supabase/tests/{shim.sql,questions.sql,run.sh}`, and
-`public/worksheet/template-{lesson,homework}.pdf`.
+PR 1 moves the migration into `supabase/migrations/` under a fresh version,
+and the shim, probe and runner to `supabase/tests/{shim.sql,questions.sql,run.sh}`.
+PR 3 moves `template-{lesson,homework}.pdf` to `public/worksheet/` (§6.1, §9.2
+step 4). `raster/` is evidence only and moves nowhere.
 
 ## Review notes
 
 The review's findings were applied, with these exceptions and choices.
 
-1. **Committing the shim, probe and template PDFs now** (the "ephemeral
-   artefacts" finding) was not done: this commit carries only this document.
-   The shim is printed in §3.6, the repo paths are named, and the Evidence
-   note says where the files are until PR 1 and PR 3 commit them.
+1. **Committing the shim, probe and template PDFs at their repo paths now**
+   (the "ephemeral artefacts" finding) was not done: they are kept as drafts
+   in `docs/worksheets/`, which nothing applies or serves. The shim is
+   printed in §3.6, the repo paths are named, and the Evidence note says
+   where the files are until PR 1 and PR 3 move them.
 2. **"Plus a Worksheet variant" of the template** (the template finding) is
    not needed: the label is now Lesson or Homework only, matching the
    template's two boards.
 3. **Condition (b) on vector crops.** One finding restated it as "the original
    PDF bytes never reach a student's browser"; another said to decide on
-   answers alone. Both are applied: §2.3 question 2 is decided on whether
-   banks print answers on question pages, and the student-browser check is a
-   Pencil check in §9.2 whose outcome feeds that decision.
+   answers alone. The owner's answer settled it on answers (§2.1 item 11):
+   some banks print them on question pages, so there are no vector crops.
+   That retired the Pencil checks about vector content (does the import keep
+   vector, do the PDF's bytes reach a student, can students see it in Pencil
+   Files), and the raster fallback for hidden layers and annotations, which
+   existed only for vector crops. What remains is that every render uses the
+   display intent (§6.3).
 4. **The visible-text test.** The finding suggested that "ink inside a text
    item's box" also rejects OCR layers. It does not on its own: OCR text sits
    on top of the scan's inked glyphs. So image coverage is checked first
@@ -1606,24 +1713,46 @@ The review's findings were applied, with these exceptions and choices.
    §9.3 entry instead of being specified now. The page view and the modal
    each make one read call (§4.3, §4.4).
 7. **Browser memory.** Instead of counting two copies of each bank, the tab
-   keeps one: pdf.js holds the bytes and compose asks for them back with
-   `getData()` (§4.5).
+   keeps one, which pdf.js holds (§4.5). With every crop a picture, compose
+   no longer needs the bytes back. Decoded pages are released with
+   `page.cleanup()` (§4.5).
 8. **Timeout.** Of the two suggested settings, 50 s with no retry was chosen
    (§5.2).
 9. **Reordering picks.** Of "add Move to top, or drop reordering", dropping it
    was chosen (§2.2).
 10. **Two findings about who may crop a student-visible bank** asked either to
     ask the owner or to decide with a recommendation. It is decided as a §2.2
-    default with its costs, which the owner can overrule.
-11. **The topic list** is recommended per course, so the migration carries
-    `question_topics.course_id`. If the owner wants one centre-wide list, that
-    column and `topic_fits` go before PR 1.
+    default with its costs, which the owner can overrule. The owner's "let us
+    crop any banks" (§2.1 item 14) answered the question about publisher
+    locks, and leaves this rule as it is.
+11. **The topic list** is per course, as the owner decided (§2.1 item 12),
+    so the migration keeps `question_topics.course_id` and `topic_fits`.
 12. **Local timings.** After the restructure, the reads the screens make
-    measured 5–11 ms rather than the review's ~350 ms per list page, which
-    timed the earlier cross-bank list. They are still floors until measured on
-    Supabase (§3.5).
+    measured 5–11 ms at 5,000 crops in a course, and 34–60 ms for the
+    Questions page at 25,200, rather than the review's ~350 ms per list page,
+    which timed the earlier cross-bank list. They are still floors until
+    measured on Supabase (§3.5).
 13. **"Paid each time Suggest boxes is pressed."** One finding asked for that
     wording; another asked to keep a page's suggestions in the tab so a second
     press does not call again. With the second applied, the first is no longer
     true, so §5.2 says "about once" and names what does pay again: a reload,
     another tab, or a second in-charge.
+14. **Overlapping findings in the second review.** Two on §7 step 2, and two
+    on the bank budget in §4.5, were merged. Of the two seed sizes offered for
+    the Supabase check, 20,000 and 25,000 crops, 25,000 was taken, because it
+    is the size measured (§3.5).
+15. **Hidden layers.** One finding asked to drop "a layer hidden by default
+    still hidden" as untested; another to make it a rule about the render
+    intent. Both are taken: the claim is now that every render uses the
+    display intent (§4.5, §6.3), `make-banks.py` writes a bank whose Answers
+    layer is off for viewing and on for printing, and §9.1 checks it.
+16. **CropThumb.** One finding asked that it share compose's box render;
+    another removed it, so that the modal shows the 300 dpi JPEG it will
+    print (§4.4). The second was taken, which makes the first moot.
+17. **Re-measured.** The figures the second review brought were re-run with
+    the committed scripts and held, except two: a later pick on a scan page
+    already decoded costs about 0.1 s, not 0.15–0.2 s, and 20 picks from 20
+    pages took 9.5–12 s rather than 10–12 s (§6.4).
+18. **The stored-picture fallback** (§6.4) also needs a delete path, because
+    clients have no delete policy on the bucket, and Storage for every crop,
+    about 2.4–6 GB for a level. The finding listed neither.

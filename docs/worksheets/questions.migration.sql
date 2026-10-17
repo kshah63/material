@@ -1,6 +1,6 @@
--- Topics: one list per course, in the owner's order. Rows are added in the SQL
--- editor (DEPLOYMENT.md), never by this migration, so re-running it never
--- touches them.
+-- Topics: one fixed list per course, in the owner's order. Rows are added in
+-- the SQL editor (DEPLOYMENT.md), never by this migration, so re-running it
+-- never touches them.
 create table if not exists public.question_topics (
   id        uuid primary key default gen_random_uuid(),
   course_id uuid not null references public.courses(id) on delete cascade,
@@ -15,8 +15,8 @@ create table if not exists public.questions (
   file_id    uuid not null references public.files(id) on delete cascade,
   page       integer not null check (page >= 1),
   -- PDF user-space points on the source page, before its /Rotate, CropBox
-  -- offset included: what pdf.js convertToPdfPoint returns, what pdf-lib
-  -- embedPages takes. y grows upwards.
+  -- offset included: what pdf.js convertToPdfPoint returns, and what
+  -- convertToViewportPoint takes to render the box. y grows upwards.
   x0 real not null, y0 real not null, x1 real not null, y1 real not null,
   -- Reading order on its page (columns left to right, then top to bottom),
   -- set by the crop screen every time the page is saved.
@@ -97,6 +97,7 @@ create policy questions_update on public.questions for update
   using (public.can_crop_file(file_id))
   with check (public.can_crop_file(file_id) and public.topic_fits(topic_id, file_id));
 
+-- A crop is deleted outright, with no Trash: the bank itself is untouched.
 drop policy if exists questions_delete on public.questions;
 create policy questions_delete on public.questions for delete
   to authenticated
