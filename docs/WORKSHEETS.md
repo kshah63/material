@@ -2,9 +2,11 @@
 
 Plan, 2026-10-17, revised the same day after review, again after the owner
 answered its five open questions (§2.1, items 10–14), and again after a
-review of that revision. Nothing is built yet. The owner has approved the
-goal, and this plan is for review before any code is written. The reviews'
-findings, and the few this plan does not take, are listed at the end.
+review of that revision. The owner then asked for it to be built small: each
+crop's picture is made on demand, when a worksheet is drawn (§6.3), and there
+is no AI step for now (§2.1 item 9). The database, PR 1, is built (§3); the
+screens and the worksheet are not. The reviews' findings,
+and the few this plan does not take, are listed at the end.
 
 ## 1. What it is and who uses it
 
@@ -16,11 +18,13 @@ The worksheet maker turns those banks into worksheets a teacher can drop into
 a child's Pencil Space. It works in four steps:
 
 1. **Crop once.** An in-charge (or an admin) opens a bank PDF and draws a box
-   around each question. Each box is saved as a question with its source file,
-   page, box and an optional topic. Nobody crops the same question twice.
+   around each question. A question is saved with its source file, up to four
+   boxes on any of its pages, and an optional topic. Nobody crops the same
+   question twice.
 2. **Suggestions.** The tool proposes boxes. On digital pages it reads
-   question numbers ("1.", "Q2") from the PDF's text. On scanned pages AI
-   proposes them. A person confirms every box. Nothing unconfirmed is saved.
+   question numbers ("1.", "Q2") from the PDF's text. Scanned pages are drawn
+   by hand for now (§2.1 item 9). A person confirms every box. Nothing
+   unconfirmed is saved.
 3. **Pick and print.** A teacher opens a bank page by page, clicks the
    questions they want, and downloads a branded A4 PDF. Each question sits at
    the top of its own page, and the rest of the page is blank for working.
@@ -29,7 +33,7 @@ a child's Pencil Space. It works in four steps:
 4. **Into Pencil.** The teacher drags the PDF into the child's Space and
    chooses "one page per board".
 
-Roles, per course. Banks live in one bank-holding course per level (§2.1
+Roles, per course. Banks live in long-lived bank-holding courses (§2.1
 item 10), so for banks these are roles in that course:
 
 - **in_charge and admin** crop, adjust, delete and tag questions. They can
@@ -82,6 +86,11 @@ cannot use.
      $0.001–0.05 a page before thinking tokens.
    - If no setting finds at least 98% of question numbers, AI ships switched
      off and scanned pages are drawn by hand.
+   - *Changed later on 2026-10-17:* the owner asked for it to be built small,
+     so there is no AI step for now: no route, no AI column and no Anthropic
+     settings. Scanned pages are drawn by hand (§5.3). None of the centre's
+     own banks has a scanned question page (§9.2.1). §5.2 stays as the design
+     if AI is wanted later.
 
 The owner (Kartik) answered the plan's five open questions later on
 2026-10-17. Each answer is quoted, and the plan is changed to match.
@@ -110,6 +119,11 @@ The owner (Kartik) answered the plan's five open questions later on
     by mistake sees no bank (§2.2). Worksheets are made from that course, so
     their file name carries its code (§6.5). A re-upload is still a new file
     whose crops start again (§8.3).
+
+    *Changed later on 2026-10-17:* there is one long-lived bank-holding course
+    for each set of banks that courses share, rather than one per level: for
+    example one for IM2 with Geometry/IM2, and one for IM3 with Algebra 2
+    Trig. That is course setup, and changes nothing in the schema.
 11. **Every crop is a 300 dpi picture.** *"Mostly banks have answers
     separately."* Mostly is not always: some banks print answers on the pages
     their questions are on. A vector crop hides the rest of its source page
@@ -170,9 +184,9 @@ The owner (Kartik) answered the plan's five open questions later on
   prototyped, but it is not part of this plan.
 - **No numbers are stored or added.** A crop shows the bank's own printed
   number ("7.") because it is inside the box. The worksheet adds none, which
-  avoids a page that reads "1. 7.". The order of crops on a page comes from
-  where they sit (§3.4, `pos`), not from a number someone has to read
-  correctly.
+  avoids a page that reads "1. 7.". The order of questions comes from where
+  their boxes sit: the first box's page and `pos`, then the second's (§3.4,
+  §4.4), not from a number someone has to read correctly.
 - **"(a)", "(b)" … are sub-parts, never the start of a question.** The owner
   listed "(a)" among question numbers, but in maths banks it almost always
   labels part of a numbered question, and treating it as a start would split
@@ -189,25 +203,28 @@ The owner (Kartik) answered the plan's five open questions later on
     over as many as four pages, which is where the limit of four comes from.
 
   So a question is an ordered list of boxes (a `question_boxes` child table,
-  `box_no` 1–4), and compose stacks them in order. A shared stimulus is
-  cropped once and becomes the first box of every question that uses it.
-  A question longer than four boxes is cropped as two questions. §3.4, §4.3
-  and §6.2 are still drawn for one box; PR 1 redraws them.
+  `box_no` 1–4), and compose stacks them in order. A shared stimulus is drawn
+  once and becomes box 1 of every question that uses it, copied into each
+  (§3.1). A question's boxes can sit on different pages of its bank. A
+  question longer than four boxes is cropped as two questions. §3.4, §4.3 and
+  §6.2 are drawn for this shape.
 - **Layout is automatic.** Two short questions in a row share a page (§6.2).
   There is no layout control. One-per-page-always is added only if someone
   asks.
 - **Label is Lesson or Homework, matching the template's two boards.** The
   default is Homework, because one question per page with room for working is
   homework-shaped.
-- **Picks print in bank order:** bank, page, position on the page. There is no
-  reordering in v1, only removing a pick.
+- **Picks print in bank order:** bank, then the first box's page and
+  position, then the second's (§4.4). There is no reordering in v1, only
+  removing a pick.
 - **A worksheet over 25 MB still downloads,** with a warning (§4.4).
 - **Crop once is a screen hint, not a database rule.** A suggestion that
-  overlaps a saved crop is never shown. A hand-drawn box over a saved crop, or
-  two in-charges on the same page, can still make a duplicate, and it is
-  deleted by hand. If the sample check in §9.2 shows heavy concurrent cropping,
-  a before-insert trigger refusing an overlap on the same file and page is the
-  fix.
+  overlaps a saved crop is never shown, and a question whose only box another
+  question also has is marked "cropped twice: delete one" (§4.3). A
+  hand-drawn box over a saved crop, or two in-charges on the same page, can
+  still make a duplicate, and it is deleted by hand. If the sample check in
+  §9.2 shows heavy concurrent cropping, a before-insert trigger refusing an
+  overlap on the same file and page is the fix.
 - **Only teacher-only banks can be cropped.** `can_crop_file` requires the
   file's `eff_teacher_only` (§3.4), so the database refuses to crop a bank
   students can open, and the crop screen says "Students can see this file.
@@ -229,395 +246,414 @@ items 10–14.
 
 ## 3. Data model
 
+Built in PR 1. The migration is
+[`supabase/migrations/20261017000009_questions.sql`](../supabase/migrations/20261017000009_questions.sql),
+and its tests are in `supabase/tests/` (§3.6, §9.1). This section says what
+the migration does and why; it does not copy it, so the file is the only
+version.
+
 ### 3.1 What is new
 
-- **`question_topics`**, the topic list: a course, a name and a position.
-- **`questions`**, one row per confirmed box.
+- **`question_topics`**, the topic list: a course, a name and a position. One
+  fixed list per course (§2.1 item 12). Its rows come from the snippet in
+  `DEPLOYMENT.md` step 8, never from the migration.
+- **`questions`**, one row per question: its bank (`file_id`), an optional
+  topic, who made it and when. A question has no page or box of its own.
+- **`question_boxes`**, a question's boxes, one to four, printed in `box_no`
+  order. Each has its page, its box in PDF space and its reading order on that
+  page (`pos`). One question's boxes can sit on different pages of its bank
+  (§2.2).
 - **`question_sources`**, a read-only view: one row per bank with crops, for
   the Questions page.
 - **`can_crop_file(file_id)`**, the only place the "who may crop" rule is
   written.
-- **`topic_fits(topic_id, file_id)`**, which keeps a crop's topic inside its
-  file's course.
-- **`save_page_crops(…)`**, the one write path: it saves one page of one file
-  in one transaction, as the caller.
+- **`topic_fits(topic_id, file_id)`**, which keeps a question's topic inside
+  its bank's course.
+- **`question_course_ids()`**, the courses whose questions the caller may
+  read. It bounds the two read policies (§3.2).
+- **`save_crops(file_id, add, edit, remove)`**, the one write path: the crop
+  screen's changes to one bank, in one transaction, as the caller (§3.4).
 
-There is no worksheet table. Nothing is stored in the Storage bucket, and the
-purge needs no change.
+There is no worksheet table and no AI column. Nothing is stored in the
+Storage bucket, `getViewUrl` and downloads are unchanged, and the purge needs
+no change.
+
+**A shared stimulus is copied.** An instruction, table or figure printed once
+above several questions is drawn once on the screen, and saved as box 1 of
+every question that uses it, with the same numbers in each. Every question
+owns its rows, so changing or deleting one question never changes another,
+and there is no row shared between questions to count, lock or leave behind.
+The screen knows a stimulus by its numbers: the same page and corners in two
+or more questions (§4.3). Postgres writes `real` in its shortest round-trip
+form, so copies sent as the same JSON numbers stay equal; PR 2 confirms that
+through PostgREST.
 
 ### 3.2 Visibility comes from the source file
 
 - **Who can read a question:** an admin, or a teacher or in-charge of its
-  file's course, and only while the file is live. The policy is an `EXISTS` on
-  `files`, which runs `files_select` as the caller, so the file's own rule
-  decides everything else. No teacher-only, `eff_teacher_only` or
-  `deleted_at` column is copied onto questions. The teacher-only triggers,
-  `recompute_subtree` and `restore_batch` are not touched.
-- **There is no `course_id` on questions.** The course is the file's course.
-  That removes the composite foreign key, a unique index on `files` and a test
-  that only existed to keep two copies of one fact in step. Nothing in the app
-  changes a file's course (`registerFile` sets it once, `moveFile` changes
-  only the folder, both in `app/actions/files.ts`).
-- **Who can write a question:** the person passes `can_crop_file(file_id)`:
-  they are an admin or the course's in_charge, the file is live, and students
-  cannot see it (§2.2). The same function serves the insert, update and delete
-  policies and the AI route (§5.2).
+  bank's course, and only while the bank is live. Students never.
+  - The policy is an `EXISTS` on `files`: the file is live, and its course is
+    in `question_course_ids()`. The `EXISTS` runs `files_select` as the
+    caller, so the file's own rule decides everything else. No teacher-only,
+    `eff_teacher_only` or `deleted_at` column is copied onto questions, and
+    the teacher-only triggers, `recompute_subtree` and `restore_batch` are not
+    touched.
+  - `question_course_ids()` returns every course for an admin, and otherwise
+    the courses the caller teaches or is in_charge of. It is asked once per
+    query, as `(select …)`, so the planner reads only the caller's own
+    courses' files, through `files_course_idx`. Without it every read ran
+    `files_select` over every file there is: 150–200 ms for a teacher's read
+    at 10,000 files (§3.5).
+- **Who can read a box:** exactly who can read its question.
+  `question_boxes` carries its question's `file_id`, kept equal by a composite
+  foreign key (`question_id, file_id` → `questions (id, file_id)`), so its
+  read policy is the same `EXISTS`, on its own `file_id`.
+  - The policy is copied rather than called. A SQL function holding a subquery
+    is not inlined and would run once per row, and reading boxes through
+    `questions` re-ran the questions policy for every box, which was 12 times
+    slower to list a course.
+  - The SQL tests fail if the two policies ever differ in text, or if any role
+    sees a box without its question or a question without a box (§3.6).
+- **There is no `course_id` on questions or boxes.** The course is the file's
+  course. The app never changes a file's course (`registerFile` sets it once,
+  `moveFile` changes only the folder, both in `app/actions/files.ts`), but the
+  database does not stop it: `files` keeps Supabase's table-wide UPDATE grant,
+  and `files_update` asks only that the caller be in_charge of the new course.
+  So someone in_charge of two courses, or an admin, can move a cropped bank
+  with a direct API call. Its questions go with it, to the other course's
+  teachers, and a topic from the old course then fails `topic_fits`, so every
+  edit that sends it is refused until it is cleared. Nobody can do more than
+  their role already allows; §9.4 item 6 narrows the grant.
+- **Who can write:** the person passes `can_crop_file(file_id)`. They are an
+  admin or the course's in_charge, the file is live, and students cannot see
+  it (§2.2). The same function serves every insert, update and delete policy
+  on questions and on boxes, and the page view asks it whether to show the
+  crop tools.
 - **A topic must belong to the file's course** (`topic_fits`), on insert and
   on update.
 - **Column grants:**
-  - `created_by` always comes from `auth.uid()`;
-  - a saved crop may change its box, its position and its topic;
-  - a saved crop may never change its file or page.
-- **Writes go through `save_page_crops`.** It is `security invoker`, so RLS
-  and the column grants still decide every row. If any edit or removal names a
-  crop that is not on that page, or that the caller may not change, it raises
-  an error and nothing at all is written.
+  - a question is inserted with its `id`, `file_id` and `topic_id`, and
+    afterwards only its topic changes. The `id` is made by the crop screen
+    (§3.4). `created_by` always comes from its default, `auth.uid()`;
+  - a box is inserted with every column but `id`. Afterwards it may change its
+    `box_no`, corners and `pos`, never its question, file or page. A box that
+    moves to another page is removed and added again.
+- **The app writes only through `save_crops`.** It is `security invoker`, so
+  RLS, the column grants and the foreign keys still decide every row. If
+  anything in a call is refused, it raises an error and nothing at all is
+  written.
+- **"One to four boxes, numbered 1..n, and no question without a box" is a
+  rule `save_crops` keeps, not the schema.** The column grants also let
+  whoever may crop a bank write its two tables directly through the API: a
+  question with no box, a question's only box deleted, boxes numbered 1, 2
+  and 4, or a box 3 alone. Only someone who may crop that bank can do it,
+  they could delete its crops through `save_crops` anyway, and the app never
+  does it. So the readers do not rely on the rule: they order a question's
+  boxes by `box_no` and take the first, never look for `box_no = 1`, and drop
+  a question with no box (§3.5, §4.4). A `save_crops` edit of such a question
+  numbers its boxes 1..n again, or deletes it if it lists none.
 
 ### 3.3 Trash, the 30-day purge, and the bank's bytes
 
-- **A bank goes to Trash.** Teachers stop seeing its questions at once, and
-  so does everyone else, because the select policy requires a live file. New
-  crops on that file are refused.
-- **The bank is restored.** Its questions come back unchanged, because
-  nothing about them was changed.
+- **A bank goes to Trash.** Teachers stop seeing its questions and boxes at
+  once, and so does everyone else, admins included, because both read
+  policies require a live file. `can_crop_file` is false, so every write is
+  refused.
+- **The bank is restored** (`restore_batch`). Its questions and boxes come
+  back unchanged, because nothing about them was changed.
 - **The bank is purged after 30 days.** The service role deletes the `files`
-  row, and its questions go with it (`on delete cascade`).
+  row. Its questions go with it (`on delete cascade`), and their boxes go with
+  them (the composite foreign key cascades too). A hard delete of the bank's
+  folder or course does the same.
 - **Why cascade is required.** With the default `NO ACTION`, the purge's row
   delete would fail on the first bank that has crops. Both purge copies return
   500 on the first failure (`app/api/cron/purge/route.ts:49-55`,
   `supabase/functions/purge/index.ts`), so all later purging would stop. With
   cascade, neither purge copy changes.
-- **A crop is deleted.** Its row goes at once. There is no Trash for crops
-  (§2.1 item 13).
+- **A question is deleted.** Its row and its boxes go at once. There is no
+  Trash for questions (§2.1 item 13).
 - **A topic is deleted.** Its questions' `topic_id` becomes null. A course
   deleted takes its topics with it.
-- **The bank's bytes are assumed never to change.** A crop is a page and a box
-  on a file id. Uploads always use a fresh object name
+- **The bank's bytes are assumed never to change.** A box is a page and a
+  rectangle on a file id. Uploads always use a fresh object name
   (`hooks/useUploader.ts:139-140`), so a re-upload is a new file. But nothing
   enforces that: the storage policy `course_materials_update` lets an
   in_charge or admin overwrite objects under their course's path, and the TUS
   upload sends `x-upsert: true` (`lib/upload/resumable.ts:75`). A crafted
   upload to an existing file's path would replace the bank in place, and
-  every crop would then point at different content. §9.4 item 4 closes this.
+  every box would then point at different content. §9.4 item 4 closes this.
 
 ### 3.4 Migration: `supabase/migrations/20261017000009_questions.sql`
 
-The migration must sort after `20260612000008_country.sql`. If it is written
-on a later day, use that day's date and keep the suffix `000009`.
+It sorts after `20260612000008_country.sql`, and is appended to
+`supabase/schema.sql` under `-- >>> 20261017000009_questions.sql`. It can be
+run twice, because `DEPLOYMENT.md` §2 pastes SQL by hand: tables and indexes
+use `if not exists`, every policy is dropped before it is created, and the
+functions and the view use `create or replace`. It has no type and no
+trigger.
 
-It can be run twice, like the existing files, because `DEPLOYMENT.md` §2
-pastes SQL by hand. Append it to `supabase/schema.sql` under
-`-- >>> 20261017000009_questions.sql`.
+**Tables.**
 
-```sql
--- Topics: one fixed list per course, in the owner's order. Rows are added in
--- the SQL editor (DEPLOYMENT.md), never by this migration, so re-running it
--- never touches them.
-create table if not exists public.question_topics (
-  id        uuid primary key default gen_random_uuid(),
-  course_id uuid not null references public.courses(id) on delete cascade,
-  name      text not null,
-  position  smallint not null default 0,
-  unique (course_id, name)
-);
+| Table | Columns | Rules |
+|---|---|---|
+| `question_topics` | `id`, `course_id` (cascade), `name`, `position` | unique `(course_id, name)` |
+| `questions` | `id`, `file_id` (cascade), `topic_id` (set null), `created_by` (default `auth.uid()`, set null), `created_at` | unique `(id, file_id)`, which the boxes' foreign key points at |
+| `question_boxes` | `id`, `question_id`, `file_id`, `box_no`, `page`, `x0`, `y0`, `x1`, `y1`, `pos` | below |
 
-create table if not exists public.questions (
-  id         uuid primary key default gen_random_uuid(),
-  -- The course is the file's course; the purge's hard delete takes crops with it.
-  file_id    uuid not null references public.files(id) on delete cascade,
-  page       integer not null check (page >= 1),
-  -- PDF user-space points on the source page, before its /Rotate, CropBox
-  -- offset included: what pdf.js convertToPdfPoint returns, and what
-  -- convertToViewportPoint takes to render the box. y grows upwards.
-  x0 real not null, y0 real not null, x1 real not null, y1 real not null,
-  -- Reading order on its page (columns left to right, then top to bottom),
-  -- set by the crop screen every time the page is saved.
-  pos        smallint not null default 0,
-  topic_id   uuid references public.question_topics(id) on delete set null,
-  created_by uuid default auth.uid() references public.profiles(id) on delete set null,
-  created_at timestamptz not null default now(),
-  constraint questions_box_check check (
-    x1 > x0 and y1 > y0
-    and x0 >= -14400 and y0 >= -14400 and x1 <= 14400 and y1 <= 14400)
-);
-create index if not exists questions_file_page_idx on public.questions (file_id, page, pos);
-create index if not exists questions_topic_idx     on public.questions (topic_id);
+A box:
 
--- Who may crop this file: admin, or in_charge of its course; the file is live
--- and students cannot see it. The one place the rule is written: the policies
--- below and the suggestion route both ask it.
-create or replace function public.can_crop_file(_file_id uuid)
-returns boolean
-language sql
-stable
-security invoker
-set search_path = public, pg_temp
-as $$
-  select exists (
-    select 1 from public.files f
-    where f.id = _file_id
-      and f.deleted_at is null
-      and f.eff_teacher_only
-      and ((select public.is_admin()) or public.course_role(f.course_id) = 'in_charge')
-  );
-$$;
+- `box_no` is 1–4, its place in print order. Four is the most a past paper's
+  question runs over (§2.2). It is unique per question, and that unique is
+  deferrable (checked at the end of each statement), so one statement can
+  renumber a question's boxes.
+- `page` is 1 or more.
+- `x0, y0, x1, y1` are PDF user-space points on the source page, before its
+  `/Rotate`, CropBox offset included: what pdf.js `convertToPdfPoint` returns,
+  and what `convertToViewportPoint` takes to render the box. y grows upwards.
+  The check `x1 > x0 and y1 > y0`, all within ±14,400 (the largest page a PDF
+  allows), also refuses NaN, because Postgres orders NaN above every number.
+- `pos` is the reading order on its page (columns left to right, then top to
+  bottom), set by the crop screen every time the page is saved.
+- The same box twice in one question is refused, because it would print
+  twice (unique `(question_id, page, x0, y0, x1, y1)`). The same box in two
+  questions is allowed: it is how a stimulus is shared.
+- `(question_id, file_id)` references `questions (id, file_id)`, on delete
+  cascade, so a box is always on its question's file.
 
--- A crop's topic, if any, belongs to its file's course.
-create or replace function public.topic_fits(_topic_id uuid, _file_id uuid)
-returns boolean
-language sql
-stable
-security invoker
-set search_path = public, pg_temp
-as $$
-  select _topic_id is null or exists (
-    select 1 from public.question_topics t
-    join public.files f on f.course_id = t.course_id
-    where t.id = _topic_id and f.id = _file_id
-  );
-$$;
+Indexes: `questions (file_id)`, `questions (topic_id)` and
+`question_boxes (file_id, page, pos)`, plus the unique
+`question_boxes (question_id, box_no)`, which serves every lookup of one
+question's boxes. `created_by` has no index, like every other column here
+that records who made a row (on `courses`, `folders`, `files` and
+`enrollment_requests`): only deleting a profile reads it, which the app never
+does, and the scan costs that delete about 5 ms at 75,000 questions.
 
-alter table public.question_topics enable row level security;
-alter table public.questions       enable row level security;
+**Policies.** All are `to authenticated`, and anon has no grant on any of the
+four relations or the four functions.
 
-drop policy if exists question_topics_select on public.question_topics;
-create policy question_topics_select on public.question_topics for select
-  to authenticated using (
-    (select public.is_admin()) or public.course_role(course_id) in ('teacher','in_charge')
-  );
+| | Select | Insert | Update | Delete |
+|---|---|---|---|---|
+| `question_topics` | admin, or teacher or in_charge of the course | — | — | — |
+| `questions` | live file, course in `question_course_ids()` | `can_crop_file` and `topic_fits` | `can_crop_file`, then `can_crop_file` and `topic_fits` | `can_crop_file` |
+| `question_boxes` | the same, on the box's `file_id` | `can_crop_file` | `can_crop_file` | `can_crop_file` |
 
--- Teachers, in_charge and admins of the file's course; students never. The
--- EXISTS runs files_select as the caller, so the file's own rule decides the rest.
-drop policy if exists questions_select on public.questions;
-create policy questions_select on public.questions for select
-  to authenticated using (
-    exists (
-      select 1 from public.files f
-      where f.id = questions.file_id and f.deleted_at is null
-        and ((select public.is_admin()) or public.course_role(f.course_id) in ('teacher','in_charge'))
-    )
-  );
+No policy or security-invoker function calls `auth.uid()` bare. `is_admin`,
+`course_role` and `question_course_ids` are `security definer`, which the rule
+exempts, and `question_course_ids` uses `(select auth.uid())` anyway. The only
+bare call is `created_by`'s default.
 
-drop policy if exists questions_insert on public.questions;
-create policy questions_insert on public.questions for insert
-  to authenticated
-  with check (public.can_crop_file(file_id) and public.topic_fits(topic_id, file_id));
+**`save_crops(_file_id, _add, _edit, _remove)`.** One call is one transaction
+on one bank, run as the caller. The screen calls it from `savePage` when the
+in-charge leaves a page or presses *Save* (§4.3). It takes no page, because a
+page's changes can reach boxes on other pages: a question that runs over a
+page break, or a stimulus on the page before.
 
-drop policy if exists questions_update on public.questions;
-create policy questions_update on public.questions for update
-  to authenticated
-  using (public.can_crop_file(file_id))
-  with check (public.can_crop_file(file_id) and public.topic_fits(topic_id, file_id));
+- **`_add`**, new questions: `[{id, topic_id, boxes: [{page, x0, y0, x1, y1,
+  pos}, …]}]`.
+  - `id` is made by the screen with `crypto.randomUUID()` and is required. A
+    missing id is refused, and so is one already used, so a save retried after
+    its reply was lost writes nothing twice.
+  - A box's `box_no` is its place in the list, box 1 first. No boxes, or no
+    `boxes` key, is refused, and so is a fifth box.
+- **`_edit`**, saved questions: `[{id, topic_id, boxes: […]}]`. `boxes` is the
+  question's whole new list, in print order:
+  - `{id}` keeps a box as it is, at that place;
+  - `{id, x0, y0, x1, y1, pos}` keeps it at that place with new corners or
+    reading order. Fields left out are kept, so the screen sends corners only
+    for the boxes it moved. A kept box stays on its page: a `page` other than
+    its own is refused, and a box that moves page is removed and added again;
+  - an entry with no `id` is a new box, and needs its `page`;
+  - `topic_id` is written only when the entry has the key, and null means no
+    topic. The screen sends it only for a question whose topic it changed, so
+    a page save cannot undo a topic another in-charge set meanwhile.
+- **`_remove`**, box ids. A question left with no box is deleted.
 
--- A crop is deleted outright, with no Trash: the bank itself is untouched.
-drop policy if exists questions_delete on public.questions;
-create policy questions_delete on public.questions for delete
-  to authenticated
-  using (public.can_crop_file(file_id));
+The function, in order:
 
--- Column privileges: created_by comes from its default; a saved crop can change
--- its box, position and topic, never its file or page.
-revoke all on table public.question_topics from anon, authenticated;
-grant select on table public.question_topics to authenticated;
-revoke all on table public.questions from anon, authenticated;
-grant select, delete on table public.questions to authenticated;
-grant insert (file_id, page, x0, y0, x1, y1, pos, topic_id) on table public.questions to authenticated;
-grant update (x0, y0, x1, y1, pos, topic_id) on table public.questions to authenticated;
+1. Deletes the `_remove` boxes in this bank. The count must equal the number
+   of ids, so an id listed twice, of another bank, already gone, or hidden
+   from the caller is refused. It notes which questions lost boxes.
+2. Updates every `_edit` question in this bank, writing its topic if sent.
+   The count must match, which refuses a question of another bank, or one
+   listed twice. The update also locks each edited question until the save
+   commits, so a second save that edits it waits for this one.
+3. Refuses if an edited question holds a box its list neither keeps nor
+   removes: somebody added it since this screen read the bank.
+4. Refuses a kept box sent with a page other than its own. Then moves the
+   kept boxes to their place in the list, with their new corners and `pos`.
+   The count must match, which refuses a box listed twice, or listed under
+   another question.
+5. Inserts the edited questions' new boxes.
+6. Renumbers each question that lost a box, so its boxes run 1..n again, and
+   deletes any question left with none.
+7. Inserts each `_add` question, then its boxes.
 
--- Save one page of one file in one transaction, as the caller (RLS decides).
--- Every edit and removal must name a crop on this page that the caller may
--- change; otherwise nothing at all is written.
-create or replace function public.save_page_crops(
-  _file_id uuid,
-  _page    integer,
-  _add     jsonb default '[]'::jsonb,   -- [{x0,y0,x1,y1,pos,topic_id}]
-  _edit    jsonb default '[]'::jsonb,   -- [{id,x0,y0,x1,y1,pos,topic_id}]
-  _remove  uuid[] default '{}'::uuid[]
-)
-returns void
-language plpgsql
-security invoker
-set search_path = public, pg_temp
-as $$
-declare n integer;
-begin
-  insert into public.questions (file_id, page, x0, y0, x1, y1, pos, topic_id)
-  select _file_id, _page, a.x0, a.y0, a.x1, a.y1, a.pos, a.topic_id
-  from jsonb_to_recordset(_add) as a(x0 real, y0 real, x1 real, y1 real, pos smallint, topic_id uuid);
+Every check raises, so a refused call writes nothing. What the screen gets
+back, by SQLSTATE (§4.3 says what it shows):
 
-  update public.questions q
-     set x0 = e.x0, y0 = e.y0, x1 = e.x1, y1 = e.y1, pos = e.pos, topic_id = e.topic_id
-    from jsonb_to_recordset(_edit) as e(id uuid, x0 real, y0 real, x1 real, y1 real, pos smallint, topic_id uuid)
-   where q.id = e.id and q.file_id = _file_id and q.page = _page;
-  get diagnostics n = row_count;
-  if n <> jsonb_array_length(_edit) then
-    raise exception 'A crop on this page was changed elsewhere, or cannot be changed by you.'
-      using errcode = '42501';
-  end if;
+| SQLSTATE | Why |
+|---|---|
+| `42501` | Changed elsewhere, or not the caller's to change: steps 1–4, or a policy. |
+| `23505` | A new question's id already used, which is a retried save; or the same box twice in one question. |
+| `23514` | No box, a fifth box, an inverted, NaN or page-0 box, or a kept box sent with another page. |
+| `23502` | A missing id, page or `pos`. |
+| `22P02` | Something that is not a uuid or a number. |
+| `40P01` | A deadlock with another save of this bank (below). This save wrote nothing. |
 
-  delete from public.questions q
-   where q.id = any(_remove) and q.file_id = _file_id and q.page = _page;
-  get diagnostics n = row_count;
-  if n <> coalesce(array_length(_remove, 1), 0) then
-    raise exception 'A crop on this page was changed elsewhere, or cannot be changed by you.'
-      using errcode = '42501';
-  end if;
-end;
-$$;
+Two saves of one question: the second waits for the first to commit. If the
+first changed which boxes the question has, the second is then refused at
+step 3 or step 4 (§3.6). Otherwise both apply: a topic, corners or `pos` that
+both send is last-writer-wins, and a topic only one of them sends is kept.
 
-revoke all on function public.can_crop_file(uuid) from public, anon;
-revoke all on function public.topic_fits(uuid, uuid) from public, anon;
-revoke all on function public.save_page_crops(uuid, integer, jsonb, jsonb, uuid[]) from public, anon;
-grant execute on function public.can_crop_file(uuid) to authenticated;
-grant execute on function public.topic_fits(uuid, uuid) to authenticated;
-grant execute on function public.save_page_crops(uuid, integer, jsonb, jsonb, uuid[]) to authenticated;
+A save that only removes a question's boxes takes no lock on the question
+until step 6, so two saves that overlap on two questions can deadlock. In the
+case tried (§3.6), T2 removed question A's only box and edited B, while T1
+edited A, then B: T1 held A and waited for B, and T2 held B and, deleting the
+emptied A, waited for T1. Postgres aborted T1 with `40P01`. Nothing is lost,
+because the aborted save wrote nothing, and the screen offers *Try again*
+(§4.3).
 
--- The Questions page's list of banks. security_invoker: the caller's RLS on
--- questions and files applies.
-create or replace view public.question_sources with (security_invoker = true) as
-  select f.course_id, q.file_id, f.name as file_name, f.folder_id, f.eff_teacher_only,
-         count(*) as questions, count(distinct q.page) as pages
-  from public.questions q
-  join public.files f on f.id = q.file_id
-  group by f.course_id, q.file_id, f.name, f.folder_id, f.eff_teacher_only;
+Hand edits in the same PR:
 
-revoke all on table public.question_sources from anon, authenticated;
-grant select on table public.question_sources to authenticated;
-```
-
-Make these hand edits in the same PR:
-
-- `lib/types.ts`: add `Question`, `QuestionTopic` and `QuestionSource`.
-- `DEPLOYMENT.md` §2:
-  - add `question_topics` and `questions` to the "Verify" table list, plus a
-    line saying "already deployed? run just this file";
-  - add the topic snippet, run once per bank-holding course from the
-    owner's list (§2.1 item 12):
-
-    ```sql
-    insert into public.question_topics (course_id, name, position) values
-      ('<course id>', '<topic>', 1), ('<course id>', '<topic>', 2);
-    ```
-- `README.md`:
-  - add two rows to the permission matrix: *Crop questions*
-    (in_charge, admin) and *Pick questions, download a worksheet* (teacher,
-    in_charge, admin);
-  - change "Nobody can hard-delete" to say that it covers files and folders,
-    and that a crop is deleted outright (§2.1 item 13).
+- `lib/types.ts`: `QuestionTopic`, `Question`, `QuestionBox` and
+  `QuestionSource`. No reader or action yet: PR 2 adds the first.
+- `DEPLOYMENT.md`: the three tables in §2's Verify list; "already deployed?
+  paste just this file", with why `supabase db push` is only for a project
+  whose migration history is complete (§9.2 step 2); and step 8, the topic
+  snippet, run once per bank-holding course from the owner's list (§2.1 item
+  12). It finds the course by its code, can be run again, and lists the
+  topics it wrote, so an empty result means the code matched no course.
+- `README.md`: "Nobody can hard-delete" now covers files and folders, and
+  says a question and its boxes are deleted outright. The permission matrix
+  gains *Crop questions from a teacher-only bank* (in_charge, admin) in PR 2
+  and *Pick questions, download a worksheet* (teacher, in_charge, admin) in
+  PR 3, when there is a screen for each.
 
 ### 3.5 How the app reads it
 
-- **The Questions page** reads `question_sources` for the course, one row per
-  bank with crops. It has no `LIMIT`; it is bounded by the course's files.
-  Folder names for the labels come from the existing `listAllFolders`.
-- **The page view** reads every crop of one file with `listFileQuestions`.
+- **The page view** (§4.3) reads one bank with `listBank(fileId)` in
+  `lib/queries.ts`: one server action making two flat reads in `Promise.all`:
+  1. `question_boxes`: `id, question_id, box_no, page, x0, y0, x1, y1, pos`,
+     `.eq('file_id', id)`, ordered by `page`, `pos`, `id`;
+  2. `questions`: `id, topic_id`, `.eq('file_id', id)`, ordered by `id`.
+
   - Supabase's API returns at most the project's max rows (1,000 by default)
-    per request, and a 200-page bank can hold well over 1,000 crops.
-  - So it asks for `count: 'exact'` and pages with `.range()` until it holds
-    that many rows, ordered by `page, pos, id`. `id` is unique, so the order is
-    total and no row repeats or goes missing between pages.
-  - It also reads the course's topics.
-- **The worksheet modal** reads the picked rows by id, and signs their banks,
-  in one call (§4.4).
+    per request, so each read asks for `count: 'exact'` and pages with
+    `.range()` until it has read that many rows. Both orders end in `id`, so
+    the ranges neither repeat nor miss a row while nothing changes. A save
+    that lands between two ranges rewrites `pos` and can move a box across
+    the boundary, so one box is read twice and another missed. `listBank`
+    keeps one row per id, and an edit built on a list that missed a box is
+    refused at step 3.
+  - Neither table is embedded in the other. An embed costs 27–100 ms per
+    range, because the inner table's policy runs once per row.
+  - Topics come from `listTopics`, the file from `getFile`, and for managers
+    `rpc('can_crop_file')` and the file's `eff_teacher_only`.
+  - The two reads are separate snapshots, so the screen shows a question only
+    when it read both its row and at least one of its boxes. A question saved
+    between the two reads shows after the next read. An incomplete box list
+    behind a shown question cannot corrupt anything: an edit built on it is
+    refused at step 3.
+  - A question's boxes are ordered by `box_no`, and the first is where it
+    starts, whatever its number (§3.2).
+- **The Questions page** reads `question_sources` for the course, one row per
+  bank with crops:
+  - `questions` counts each question once, however many boxes it has;
+    `pages` counts a page if any box is on it;
+  - `first_page` is where a click on the row opens the page view;
+  - it has no `LIMIT`, because it is bounded by the course's files. Folder
+    names for the labels come from the existing `listAllFolders`.
+- **The worksheet modal** reads the picks with `preparePicks(courseId, ids)`,
+  in one select under the session:
 
-Measured on a scratch Postgres 16, as a teacher, with 5,000 crops in one
-course among 30,000:
+  ```ts
+  supabase
+    .from("questions")
+    .select("id, file_id, topic_id, files(name, folder_id, storage_path), " +
+            "question_boxes(box_no, page, x0, y0, x1, y1, pos)")
+    .in("id", ids)
+    .order("box_no", { referencedTable: "question_boxes" });
+  ```
 
-| Read | Time |
-|---|---|
-| `question_sources` for the course (41 banks) | 11 ms |
-| One bank's crops, ordered (125 rows) | 5 ms |
-| 20 picks by id | 5 ms |
-| Saving one page with 12 new crops (as in-charge) | 5 ms |
-| `question_sources` for a course of 25,200 crops (12 banks), among 201,600 | 34–60 ms |
-| One 2,100-crop bank, ordered, per range request of 1,000 (3 requests) | 4–8 ms |
+  PostgREST follows the composite foreign key from `question_boxes` to
+  `questions`, the only path between them. The file name and the boxes' pages
+  make each question's source line (§6.2). A row whose `question_boxes` comes
+  back empty is dropped like a missing one (§3.2). It then signs the banks
+  (§4.4).
 
-The last two rows were seeded separately, as a level's bank-holding course
-after some years (§8.1): 8 courses, each of 12 banks of 300 pages with 7 crops
-a page.
+Measured on a scratch Postgres 16 with Supabase's own `auth.uid()`, seeded as
+a level's bank-holding course after some years (§8.1), among many other
+courses: 201,600 questions and 234,066 boxes (16% with a second box), 12 banks
+of 2,100 questions in the teacher's course, and 10,000 ordinary files in 200
+other courses. The teacher is in 4 courses.
 
-The policies call `is_admin()` once per query, as `(select public.is_admin())`.
-These are floors, not production numbers: the shim's `auth.uid()` is simpler
-than Supabase's, and the hardware is different. §9.2 step 1 repeats them on
-Supabase with a seeded course.
+| Read or write | Teacher | Admin |
+|---|---|---|
+| One bank's boxes, per 1,000-row range (3 for a 2,100-question bank) | 5–7 ms | 60–80 ms |
+| That read's exact count | 3–4 ms | |
+| One bank's questions, per range | 5–6 ms | |
+| `question_sources` for the course | 46–50 ms | 95–135 ms |
+| 20 picks with their boxes and file names | 3–4 ms | |
+| Saving 12 new questions, two of them under one stimulus (in-charge) | 18–26 ms | |
+| Saving 18 boxes re-ordered and 1 removed (in-charge) | 16–17 ms | |
+
+- With the draft's read policy, which checked the course inside the `EXISTS`
+  rather than against the course list, the same data took 150–200 ms per
+  teacher read, and 230–260 ms for `question_sources`.
+- An admin's reads are slower because `files_select` calls `is_admin()` bare
+  and `course_role()` up to three times per row (§9.4 item 5).
+- These are floors from a shared 4-core machine. §9.2 step 1 repeats them on
+  Supabase.
 
 ### 3.6 Verified
 
-The migration above was tested on a scratch Postgres 16 database:
+`supabase/tests/run.sh` (§9.1):
 
-- all 8 existing migrations applied first, then this file applied **twice**;
-- the shim below for Supabase's roles, `auth.uid()` and storage tables;
-- six people: an admin, an in-charge, a teacher and a student in course A, and
-  an in-charge and a teacher in course B;
-- course A has `bank.pdf` in a teacher-only folder and `open.pdf`, which
-  students can see.
+1. creates a uniquely named scratch database;
+2. applies `supabase/tests/shim.sql`, which stands in for Supabase's roles,
+   `auth.uid()` and storage tables;
+3. applies every migration in order, and this one a second time;
+4. runs `supabase/tests/questions.sql`. Every check is an `assert` under
+   `ON_ERROR_STOP`, so the first failure stops the run with a non-zero exit.
+   `run.sh` sets `plpgsql.check_asserts=on`, so a caller's or the server's
+   setting cannot turn the asserts into no-ops;
+5. drops the database, however the run ended.
 
-Results:
+The fixtures are six people (an admin; an in-charge, a teacher and a student
+in course A; an in-charge and a teacher in course B) and four files: in
+course A, `bank.pdf` and `bank2.pdf` in a teacher-only folder and `open.pdf`,
+which students can see; in course B, `bankB.pdf`. After the first saves:
 
-- **Who sees what.**
+| Person | Questions | Boxes | Topics |
+|---|---|---|---|
+| admin | 5 | 7 | 2 |
+| in_charge A | 4 | 6 | 1 |
+| teacher A | 4 | 6 | 1 |
+| student A | 0 | 0 | 0 |
+| in_charge B | 1 | 1 | 1 |
+| teacher B | 1 | 1 | 1 |
 
-  | Person | Questions (A has 2, B has 1) | Topics |
-  |---|---|---|
-  | admin | 3 | 2 |
-  | in_charge A | 2 | 1 |
-  | teacher A | 2 | 1 |
-  | student A | 0 | 0 |
-  | in_charge B | 1 | 1 |
-  | teacher B | 1 | 1 |
+`question_sources` agrees with the tables for every role, and anon is refused
+all four relations and all four functions. §9.1 lists what each section of
+the suite asserts.
 
-  `question_sources` shows the same counts. anon gets "permission denied" on
-  all three.
-- **Refused:**
-  - a teacher or a student inserting a crop, directly or through
-    `save_page_crops`;
-  - in_charge B cropping a course-A file;
-  - in_charge A cropping `open.pdf`, which students can see;
-  - a topic from another course, on insert and on update;
-  - forging `created_by`;
-  - changing `file_id` or `page`;
-  - NaN (in any corner), inverted or page-0 boxes;
-  - a teacher, or in_charge B, updating or deleting a crop (0 rows).
-- **`save_page_crops` is all or nothing.** Each of these raised an error and
-  left the page exactly as it was: one good new crop together with an edit of
-  a crop on another page; one good new crop with the removal of another
-  course's crop; one good and one inverted new crop. A valid save of an edit
-  and a removal wrote both.
-- **Trash and purge:**
-  - After the bank went to Trash through the real `soft_delete_file`,
-    everyone lost its 2 questions, `can_crop_file` was false, and inserting a
-    crop was refused. After `restore_batch`, all of them came back.
-  - Hard deletes of the file, and of its folder, cascaded to the questions.
-- **A cropped bank made visible to students** (its folder's teacher-only flag
-  cleared by the in-charge): teachers still saw its 2 crops,
-  `question_sources` reported `eff_teacher_only = false`, `can_crop_file` was
-  false, and deleting a crop removed 0 rows.
+The suite also passed:
 
-The owner's answers (§2.1, items 10–14) changed only comments in the
-migration. It was re-run after them, with the same results.
+- with Supabase's own `auth.uid()` body in place of the shim's simpler one;
+- on a fresh database set up from `supabase/schema.sql` alone;
+- against 28 deliberate breakages of the migration, such as a dropped Trash
+  clause, a dropped count check, a wider grant, a fifth box, an edit that
+  always writes the topic, or a kept box allowed to change page. It failed on
+  27. The 28th, a bare `auth.uid()` inside `question_course_ids`, is allowed
+  by the repo's rule, because that function is `security definer`.
 
-The shim, which PR 1 commits as `supabase/tests/shim.sql`:
-
-```sql
-do $$ begin
-  if not exists (select 1 from pg_roles where rolname='anon') then create role anon nologin; end if;
-  if not exists (select 1 from pg_roles where rolname='authenticated') then create role authenticated nologin; end if;
-  if not exists (select 1 from pg_roles where rolname='service_role') then create role service_role nologin bypassrls; end if;
-end $$;
-create schema if not exists auth;
-create table if not exists auth.users (id uuid primary key, email text, raw_user_meta_data jsonb default '{}'::jsonb);
-create or replace function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
-create schema if not exists storage;
-create table if not exists storage.buckets (id text primary key, name text, public boolean, file_size_limit bigint, allowed_mime_types text[]);
-create table if not exists storage.objects (id uuid primary key default gen_random_uuid(), bucket_id text, name text);
-alter table storage.objects enable row level security;
-grant usage on schema public, auth, storage to anon, authenticated;
-alter default privileges in schema public grant all on tables to anon, authenticated, service_role;
-alter default privileges in schema public grant all on functions to anon, authenticated, service_role;
-grant execute on function auth.uid() to anon, authenticated;
-```
-
-§9.1 turns the proof script into `supabase/tests/questions.sql`, a test file
-that stays in the repo.
+By hand, not in the suite: two sessions saving one question at once. In both
+cases tried (one added a box while the other moved one; one added a box while
+the other deleted the question), the second save waited for the first to
+commit and was then refused at step 3, and the first save's boxes were
+intact. A third case, two saves overlapping on two questions with a third
+session ordering their waits, deadlocked, and Postgres aborted one with
+`40P01` (§3.4).
 
 ## 4. Screens, file by file
 
@@ -707,11 +743,9 @@ as an issue (§9.3) with the cost rules it needs.
 
 - the file, with `getFile(fileId)` under the session. If the file is missing,
   in Trash or in another course, the route returns `notFound()`.
-- its questions (§3.5) and the course's topics;
+- the bank's questions and boxes (`listBank`, §3.5) and the course's topics;
 - `?page=` as the page to open first;
-- for managers, `can_crop_file(fileId)` and the file's `eff_teacher_only`;
-- `aiEnabled`, which is true when `aiConfig()` (§4.5) returns a
-  configuration.
+- for managers, `can_crop_file(fileId)` and the file's `eff_teacher_only`.
 
 It renders one client component, `components/questions/PageView.tsx`.
 
@@ -723,75 +757,132 @@ It renders one client component, `components/questions/PageView.tsx`.
   - a back link to Questions;
   - the file name;
   - a **page select** with previous and next buttons. Each row reads
-    "p. 12 · 6 questions". Managers see every page; a page with unsaved
-    changes reads "p. 12 · not saved". Teachers see only pages with
-    questions. It is picked from a list, works at every width and renders no
-    thumbnails;
+    "p. 12 · 6 questions", counting each question with a box on that page
+    once. Managers see every page; a page with unsaved changes reads
+    "p. 12 · not saved". Teachers see only pages with a box on them. It is
+    picked from a list, works at every width and renders no thumbnails;
   - **Topic**, a select whose first row is "Any topic". It narrows the page
-    select to pages with that topic and dims crops with other topics. Hidden,
+    select to pages with that topic and dims boxes of other topics. Hidden,
     like every topic picker, while the course has no topics;
-  - for managers on a croppable bank: *Topic for new boxes* (first row "No
-    topic") and *Save* (reads "Save 3" while this page has unsaved changes,
+  - for managers on a croppable bank: *Topic for new questions* (first row
+    "No topic") and *Save* (reads "Save 3" while there are unsaved changes,
     disabled when there are none).
 - **Body:** the page rendered at fit-width, with an SVG overlay for the
   boxes.
 - **Picks bar** at the bottom, copied from `Browser.tsx:402-443`: "{n} picked
   · *Make worksheet* · ×".
 
+**What the screen draws.** From the two reads of §3.5, the client builds:
+
+- each question's boxes, in `box_no` order;
+- one rectangle for each distinct page and corners, with the questions that
+  use it;
+- **a shared stimulus**: a rectangle used by two or more questions. It is
+  drawn faint, and for managers marked "above 3 questions". It is not a
+  teacher's pick target;
+- **a duplicate**: a question with no box of its own, because its only box is
+  also another question's. Managers see it marked "cropped twice: delete one",
+  which is the screen's crop-once hint (§2.2).
+
+A box on a page past the bank's last page (`pdf.numPages`) is ignored, and a
+question with no other box is not shown. The database cannot know a PDF's
+page count, so it allows any page from 1; only a crafted call saves such a
+box.
+
 **Picking (everyone).**
 
-- A teacher clicks a saved crop to pick it, and again to unpick it. A picked
-  crop gets a berry wash and a tick.
-- A manager clicks a crop to select it (see below), and its toolbar has
-  *Pick*. On a bank they cannot crop, a manager's click picks, as a
-  teacher's does.
+- A teacher picks a question by clicking a box only that question uses, and
+  unpicks it with a second click. A picked question's own boxes get a berry
+  wash and a tick, on every page they are on.
+- A manager's click selects the question instead (see below), and its
+  toolbar has *Pick*. On a bank they cannot crop, a manager's click picks, as
+  a teacher's does.
 - A teacher's page ends with the line "A crop cut off? Tell your course
   in-charge which bank and page."
 
 **Cropping (managers, on a bank `can_crop_file` allows).**
 
-- **Saved crops** have a solid indigo outline and their topic. Click one to
-  select it.
-  - A selected crop shows edge and corner handles, a Topic select, *Pick* and
-    *Delete*.
-  - Drag an edge or corner to resize it. Drag inside it to move it.
+- **Saved questions** have a solid indigo outline and their topic. Click a box
+  to select its question. Every box of the selected question is outlined, and
+  one on another page shows as "continues on p. 13" (or "starts on p. 11").
+  - The toolbar has a Topic select, *Add a box*, *Pick* and *Delete
+    question*.
+  - The selected box shows edge and corner handles. Drag an edge or corner to
+    resize it, or drag inside it to move it. Moving or resizing a stimulus
+    moves every copy.
+  - Delete or Backspace removes the selected box from its question. A
+    stimulus's Delete removes it from every question under it. A question
+    whose last box goes is deleted.
 - **Drafts** have a solid berry outline.
-  - Drag on empty page to draw one. Drags smaller than 10 pt are ignored.
-  - New drafts take the *Topic for new boxes*.
-- **Suggestions** (§5) have a dashed outline.
-  - Click one to accept it.
-  - An amber "?" marks one to check: its box disagrees with the model's
-    (IoU below 0.5), or it continues from the previous page.
-  - *Accept all (n)* accepts only the suggestions without "?". Each "?" one
-    needs its own click, so the doubtful boxes are the ones a person looks at.
-  - A suggestion that overlaps a saved crop (IoU > 0.5) is never shown. This
-    is the screen's hint toward "crop once" (§2.2).
-- Delete or Backspace removes the selected box. Esc deselects.
-- **Saving, one page at a time.**
-  - A page is saved when the in-charge leaves it (next, previous, the page
-    select or the back link) and when they press *Save*.
-  - The save is one call to `save_page_crops`, one transaction. The action
-    then reads the page's crops back, and the screen replaces that page's
-    boxes with them.
-  - **If a save fails, nothing was written.** The page's drafts stay on
-    screen, the page select marks it "not saved", and a line on the page reads
-    "Not saved: {reason}. *Try again*". The in-charge can keep working on other
-    pages. When the reason is that someone else changed a crop on this page,
-    trying again cannot work, so the line offers *Reload page* instead, which
-    shows what is saved and drops this page's drafts.
-  - Leaving the screen with unsaved pages triggers the browser's leave
-    warning. A crashed or evicted tab loses at most the page in hand, because
-    every page left behind was saved.
+  - Drag on empty page to draw a new question. Drags smaller than 10 pt are
+    ignored. New questions take the *Topic for new questions*.
+  - *Add a box*, then a drag on this page or any other, adds a box at the end
+    of the selected question. That is how a question continues onto the next
+    page.
+  - *Stimulus* on a draft makes it a stimulus: a box printed once above
+    several questions. While it is selected, each question drawn gets it as
+    box 1, and a saved question gets it with *Put the stimulus above*. A
+    stimulus no question uses yet stays a draft, kept across pages, and is
+    never saved alone.
+  - A question holds four boxes at most (§2.2). On a question that already
+    has four, *Add a box* and *Put the stimulus above* are disabled, with the
+    line "Four boxes at most: crop the rest as another question."
+- **Suggestions** (§5.1) have a dashed outline.
+  - Click one to accept it as a draft. *Accept all (n)* accepts every
+    suggestion on the page.
+  - A suggestion that overlaps a saved box (IoU > 0.5) is never shown. This
+    is the screen's other hint toward "crop once" (§2.2).
+- Esc deselects.
 
-**AI (scanned pages only).** A *Suggest boxes* button shows on a page that
-§5.1 calls scanned, when `aiEnabled` is true and the page has no AI result in
-this tab yet.
+PR 2 may settle these gestures differently. What each change saves is fixed
+by the database, and is this:
 
-- While it runs, that page shows a spinner and "Reading the page…". The
-  request belongs to its page: the in-charge can move to other pages, and the
-  boxes appear when they come back.
-- The result is kept in the tab, per file and page, so coming back to the
-  page shows it again without a new call, and the button does not return.
+| On the screen | In the call |
+|---|---|
+| A new question on page P | `_add` with one box on P |
+| New questions under a stimulus S | each in `_add` with `[S, its own box]`, S's numbers the same in each; S may be on the page before |
+| A stimulus put above saved questions | each in `_edit` with `[S with no id, {id} of each of its boxes]` |
+| A question continued onto page P+1 | `_edit` with `[{id} of each box, the new box on P+1]` |
+| A stimulus moved or resized | `_edit` for every question holding a copy, all with the same numbers |
+| A question's topic changed | `_edit` with its `topic_id` (null for none) and `{id}` of each box |
+| Reading order on the page saved | every question with a box on that page sends `{id, pos}` for those boxes, and no `topic_id` unless its topic changed too; copies of one stimulus get the same `pos` |
+| A box deleted | `_remove` its id; for a stimulus, every copy's id. Each question closes the gap |
+| A question deleted | `_remove` every box of it, on every page, and `_edit {id, boxes: []}`, so a box somebody added meanwhile refuses the save instead of surviving alone |
+
+A question's boxes print in the order they were added, a stimulus first. A
+box on an earlier page than box 1 is allowed.
+
+**Saving.**
+
+- The screen saves when the in-charge leaves a page (next, previous, the page
+  select or the back link) and when they press *Save*.
+- The save is one call to `save_crops` for the bank, one transaction, with
+  every change since the last save, on any page: a box added on p. 13 to a
+  question on p. 12 goes with it. The action then reads the whole bank back
+  (§3.5), and the screen replaces its boxes with what was saved. The centre's
+  banks hold 11–84 questions; a 2,100-question bank is 3 range requests per
+  table.
+- **If a save fails, nothing was written.** The drafts stay on screen, the
+  page select marks the page "not saved", and a line on the page says why:
+  - `42501` or `23505`: "Changed elsewhere, or you can't change it." Trying
+    again cannot work, so the line offers *Reload page*, which shows what is
+    saved and drops the unsaved changes. `23505` is also a save retried after
+    it had committed, and the reload shows it saved;
+  - `23514`, `23502` or `22P02`: the database's message, and the drafts stay.
+    The screen should never send these;
+  - a network failure: "Not saved. *Try again*." That is safe, because new
+    questions carry the ids the screen made: a save that did commit is refused
+    the second time rather than written twice;
+  - `40P01`, a deadlock with another in-charge's save of this bank (§3.4):
+    "Not saved. *Try again*." That is safe too, because the aborted save wrote
+    nothing. The retry then saves, or is refused like any change made
+    elsewhere.
+- Leaving the screen with unsaved changes triggers the browser's leave
+  warning. A crashed or evicted tab loses only what was not yet saved, at most
+  the page in hand and any box drawn on it for another page.
+
+**No AI for now** (§2.1 item 9). Scanned pages are drawn by hand, as §5.3
+says.
 
 **States, in words.**
 
@@ -808,20 +899,13 @@ this tab yet.
 - **A bank students can see** (managers): the crop tools are off and a banner
   reads "Students can see this file. Make it teacher-only before cropping."
 - **A page with no proposals** (managers): "No suggestions on this page. Drag
-  to draw a box." On a scanned page with AI on, *Suggest boxes* sits beside it.
-- **AI answers:**
-  - boxes come back: they show as suggestions;
-  - none come back: "No questions found on this page. Draw the boxes.";
-  - the model ran out of room (`max_tokens`): "Too many questions to read at
-    once. Draw the rest.";
-  - any other answer (a non-200 status, a body that is not JSON, a timeout or
-    a network failure): "Couldn't get suggestions. Draw the boxes."
+  to draw a box."
 
 **Server actions:** `app/actions/questions.ts` (`"use server"`).
 
-- `savePage(courseId, fileId, page, { add, edit, remove })` calls
-  `save_page_crops`, then reads that page's crops. It returns the rows or the
-  error, and revalidates `/courses/${courseId}/questions`.
+- `savePage(courseId, fileId, { add, edit, remove })` calls `save_crops`,
+  then `listBank(fileId)`. It returns the bank's rows, or the error with its
+  SQLSTATE, and revalidates `/courses/${courseId}/questions`.
 - `preparePicks(courseId, ids)` is for the modal (§4.4).
 - Both use `createClient()`, so RLS decides who may do this, and neither adds
   a role check in TypeScript.
@@ -836,29 +920,40 @@ Viewer.
 **Opening the modal** first calls `preparePicks(courseId, ids)` once. In one
 action it:
 
-- reads the picked rows by id, under RLS, with their file names and folders;
+- reads the picked questions by id, under RLS, with their boxes, file names
+  and folders, in the one select of §3.5;
 - signs every bank those rows need with one `createSignedUrls(paths, 60)`
   call, after selecting the `files` rows under the caller's session, the same
   rule as `getViewUrl`;
 - returns the rows, the URLs, and the ids it could not find.
 
 The browser starts every bank's download as soon as the URLs arrive, skipping
-banks already open in the tab. Picks that no longer exist (a deleted crop, or
-a bank in Trash) are dropped from the picks with the line "2 picked questions
-are no longer available and were removed."
+banks already open in the tab. Picks that no longer exist (a deleted
+question, one with no box left, or a bank in Trash) are dropped from the picks
+with the line "2 picked questions are no longer available and were removed."
+A pick with a box on a page past its bank's last page (`pdf.numPages`, known
+once the bank is open) is dropped the same way, rather than failing the
+worksheet (§4.3).
 
-Then the modal renders each pick once, to the 300 dpi JPEG that will print
-(§6.3 steps 1–2), in bank order, with `page.cleanup()` after each page's last
-pick (§4.5), and shows that JPEG, scaled by CSS, as the pick's thumbnail. What
-the teacher checks is the picture that prints. *Download PDF* only places the
-held JPEGs on the template pages and saves. Removing a pick drops its JPEG.
+Then the modal renders every box of every pick once, to the 300 dpi JPEG that
+will print (§6.3 steps 1–2), with `page.cleanup()` after the last box it draws
+from each page (§4.5). It shows a pick's JPEGs, stacked and scaled by CSS, as
+the pick's thumbnail, so what the teacher checks is the picture that prints.
+*Download PDF* only places the held JPEGs on the template pages and saves.
+Removing a pick drops its JPEGs.
 
 **`components/questions/WorksheetModal.tsx`** is a `Modal` 560 px wide. It
 contains:
 
-- the picks in bank order (bank by folder path and name, then page, then
-  position), each with its picture, its meta line ("Fractions.pdf · p. 4 ·
-  Fractions") and remove ×;
+- the picks in bank order: bank (by folder path, then name), then the
+  questions' boxes compared one by one in `box_no` order, by page and then
+  `pos`, then id. Questions under one stimulus share their first box, so
+  they are ordered by their second;
+- each pick with its picture, its source line and topic ("Fractions.pdf ·
+  p. 4 · Fractions") and remove ×. The source line is what the worksheet
+  prints under the question (§6.2): the bank's file name and the pages its
+  boxes are on, in box order, as "p. 4", "pp. 4–5", or "pp. 4, 9" when they
+  are not adjacent;
 - **Label:** *Lesson* | *Homework*, default Homework;
 - *Download PDF* (primary), enabled once every pick is drawn.
 
@@ -891,11 +986,11 @@ the Next docs say for client-only libraries (`02-guides/lazy-loading.md`).
   and opens it with pdf.js. One `PDFDocumentProxy` per bank per tab.
 - pdf.js transfers the bytes it is given to its worker, which leaves the
   caller's copy empty. The tab keeps no second copy, and needs none: pdf.js
-  is the only thing that reads a bank, for the page view, the AI render and
-  the worksheet modal alike (§6.3).
+  is the only thing that reads a bank, for the page view and the worksheet
+  modal alike (§6.3).
 - `renderRegion(page, box, scale, canvas)` is the only caller of
-  `page.render`. The page view, the AI render and the modal all use it, with
-  pdf.js's defaults: `intent: "display"` and the default `annotationMode`.
+  `page.render`. The page view and the modal both use it, with pdf.js's
+  defaults: `intent: "display"` and the default `annotationMode`.
 - The tab keeps up to 100 MB of banks open, each counted at its file size
   (the worker's copy). The least recently used bank is closed with
   `destroy()` first. The bank on screen, and every bank the worksheet modal
@@ -904,9 +999,10 @@ the Next docs say for client-only libraries (`02-guides/lazy-loading.md`).
   halfway, after its 60-second URL (§4.4) has expired. The budget applies
   again when the modal closes.
 - Every caller that renders a page calls `page.cleanup()` when it is done
-  with it: the page view when it leaves a page, the AI render after encoding,
-  and the modal after the last pick on each page (picks are in bank order, so
-  a page's picks are consecutive). Without it pdf.js keeps every decoded page
+  with it: the page view when it leaves a page, and the modal after the last
+  box it draws from each page. The modal draws boxes in bank and page order,
+  not in the order they print, so each page is decoded once. Without it
+  pdf.js keeps every decoded page
   for the life of the bank: 1.2 GB after 40 pages of a 300 ppi colour scan,
   against about 285 MB with it.
 - pdf.js setup:
@@ -919,51 +1015,48 @@ the Next docs say for client-only libraries (`02-guides/lazy-loading.md`).
     in print-ready banks, show off-colour.
 
 **`lib/worksheet/propose.ts`** holds the §5 logic as pure functions: what
-kind of page it is, text-layer proposals, ink extents, snapping AI results,
-and reading order (`pos`). Compose does not need the kind of page, because
+kind of page it is, text-layer proposals, ink extents and reading order
+(`pos`). Compose does not need the kind of page, because
 it draws every crop the same way (§6.3).
 
 **`lib/worksheet/compose.ts`** builds the output PDF (§6) in two steps:
-`drawPick` renders one crop to its 300 dpi JPEG through `renderRegion` when
-the modal opens (§4.4), and `save` places the held JPEGs on the template
-pages with `pdf-lib`.
+`drawBox` renders one box to its 300 dpi JPEG through `renderRegion` when the
+modal opens (§4.4), and `save` stacks each question's JPEGs, with its source
+line under them, on the template pages with `pdf-lib` (§6.2).
 
-**`lib/worksheet/ai.ts`** (server only) reads `ANTHROPIC_API_KEY`,
-`ANTHROPIC_MODEL` and `ANTHROPIC_EFFORT`. `aiConfig()` returns the
-configuration, or null when it is not set up (§5.2). The page view and the
-route both ask it, so "is AI on" is written once.
+There is no `lib/worksheet/ai.ts` for now (§2.1 item 9). §5.2 describes it,
+for if AI is built later.
 
 ### 4.6 Everything touched
 
 **New files:**
 
-- the two pages and the route (§4.2, §4.3, §5.2);
+- the two pages (§4.2, §4.3);
 - `app/actions/questions.ts`;
 - `components/questions/{QuestionsView,PageView,WorksheetModal}.tsx`;
-- the four `lib/worksheet` files;
+- the three `lib/worksheet` files (`source`, `propose`, `compose`);
 - `public/worksheet/template-lesson.pdf` and `template-homework.pdf` (§6.1);
 - `scripts/copy-pdfjs-assets.mjs`;
-- the migration;
-- `supabase/tests/{shim.sql,questions.sql,run.sh}`.
+- the migration and `supabase/tests/{shim.sql,questions.sql,run.sh}`
+  (built, PR 1).
 
 **Changed files:**
 
 - `Rows.tsx`, `Browser.tsx`, `icons/index.tsx`;
-- `lib/queries.ts`, which gains `getFile`, `listFileQuestions`,
-  `listTopics` and `listQuestionSources`;
-- `lib/types.ts`;
+- `lib/queries.ts`, which gains `getFile`, `listBank`, `listTopics` and
+  `listQuestionSources`;
+- `lib/types.ts` (built, PR 1);
 - `proxy.ts`: its matcher must also skip `pdfjs/` and `worksheet/`. Otherwise
   every `.wasm`, `.bcmap`, `.pfb`, `.icc` and template request costs a
   Supabase `getUser()` round trip.
 - `package.json`:
-  - new dependencies: `pdfjs-dist` 6.4.299, `pdf-lib` 1.17.1, and later
-    `@anthropic-ai/sdk` and `zod`;
+  - new dependencies: `pdfjs-dist` 6.4.299 and `pdf-lib` 1.17.1;
   - a `postinstall` that copies
     `node_modules/pdfjs-dist/{wasm,cmaps,standard_fonts,iccs}` into
     `public/pdfjs/`, so they always match the worker's version;
   - `pdfjs-dist` declares Node 22.13 or newer.
 - `.gitignore` (`/public/pdfjs/`);
-- `supabase/schema.sql`, `DEPLOYMENT.md`, `README.md` and `.env.example`.
+- `supabase/schema.sql`, `DEPLOYMENT.md` and `README.md` (built, PR 1).
 
 `next.config.ts` stays empty.
 
@@ -1099,6 +1192,9 @@ Each miss means fewer proposals, or none, and the person draws the rest.
 
 ### 5.2 Scanned pages: AI (on request, one page at a time)
 
+**Not built for now** (§2.1 item 9). This is the design if AI is wanted
+later. Nothing in PRs 1–3 depends on it, and until then §5.3 is what happens.
+
 **Route:** `app/(app)/courses/[courseId]/questions/[fileId]/suggest/route.ts`,
 `POST`, with `export const maxDuration = 60`
 (`01-app/03-api-reference/03-file-conventions/02-route-segment-config/maxDuration.md`).
@@ -1183,9 +1279,9 @@ output tokens per page, **before thinking tokens**:
 
 | Model tier | Per page | 200-page bank |
 |---|---|---|
-| Opus | $0.03–0.05 | $6–10 |
-| Sonnet | $0.016–0.026 | $3–5 |
-| Haiku | about $0.001 | about $0.20 |
+| Largest | $0.03–0.05 | $6–10 |
+| Middle | $0.016–0.026 | $3–5 |
+| Smallest | about $0.001 | about $0.20 |
 
 Thinking tokens are billed as output, so these are floors. The measurement
 below records the real output tokens and replaces this table.
@@ -1233,9 +1329,9 @@ as optional entries.
 
 ### 5.3 When AI is not set up
 
-`aiEnabled` is false, so *Suggest boxes* does not render. Scanned pages show
-the same line as any page without proposals: "No suggestions on this page.
-Drag to draw a box." Cropping never waits on AI.
+This is how it ships, for now (§2.1 item 9). There is no *Suggest boxes*
+button. Scanned pages show the same line as any page without proposals: "No
+suggestions on this page. Drag to draw a box." Cropping never waits on AI.
 
 ## 6. Output
 
@@ -1259,27 +1355,47 @@ top. Nothing of the template is redrawn.
   Type 3, which is what Chrome fell back to because Helvetica Neue, Helvetica
   and Arial were missing. Redrawing it in Helvetica would differ in typeface
   and width.
-- **Compose draws no text,** so no font is embedded and no typed text can
-  reach a page.
+- **Compose draws one line of text per question,** its source line, under
+  its last box (§6.2): the bank's file name and the pages its boxes are on,
+  such as "Fractions.pdf · pp. 4–5". It lets a teacher find the question in
+  the bank's mark scheme. It comes from the `files` row and the boxes, so it
+  needs no stored column, and nothing typed for the worksheet reaches a page.
+  - pdf-lib's standard fonts encode WinAnsi only, so a file name with a
+    character outside it would throw. PR 3 either replaces such characters or
+    embeds a font with `fontkit`.
 - **Tested** with `pdf-lib` 1.17.1: eight pages with the Homework template
   as background and 16 picture crops on top came out 594.96 × 841.92 pt, with
-  the template's Inter Type 3 fonts carried through. Those are the
+  the template's Inter Type 3 fonts carried through. Those were the
   worksheet's only fonts, and `pdftotext` on it printed only the template's
-  words, "HOMEWORK" and "MathVision".
+  words, "HOMEWORK" and "MathVision". That test predates the source line. PR
+  3 repeats it, and it must then print the template's words and one source
+  line per question, and nothing else.
 
 ### 6.2 Placing crops
 
 - **Content area:** from 15 mm to 195 mm across, and from 26 mm below the top
-  to 24 mm above the bottom, which makes it 247 mm tall. Crops are placed
+  to 24 mm above the bottom, which makes it 247 mm tall. Questions are placed
   top-left.
-- **One question:** scale = min(1.25, 180 mm ÷ crop width, 0.55 × 247 mm ÷
-  crop height). The rest of the page is blank for working.
+- **A question is its boxes stacked,** in `box_no` order, one under another,
+  left-aligned and at one scale, with no gap: a proposed box already carries
+  4 pt of margin round its ink (§5.1 rule 7). Its source
+  line (§6.1) follows 2 mm under the last box, at 8 pt in the template's
+  label grey, `#B4B8C5`, and is never scaled.
+- **One question:** scale = min(1.25, 180 mm ÷ its widest box, 0.55 × 247 mm
+  ÷ its stacked height), where the stacked height is the sum of its boxes'
+  heights. The rest of the page is blank for working.
 - **Two short questions share a page:**
-  - a question is *short* if its one-question height is 74 mm or less;
+  - a question is *short* if its printed height at that scale, boxes and
+    source line together, is 74 mm or less;
   - two short questions in a row share a page, and the second starts at the
     content area's vertical midpoint;
   - any other question gets a page of its own.
   - Picks keep bank order (§2.2).
+- **Not settled: a question over several pages.** The rule above suits the
+  common case, a stimulus over a one-box question. A past paper's question
+  over four full pages would print at about a seventh of its size, so PR 3
+  decides how such a question flows (for example one page per box) and
+  prints one before relying on it.
 - **Rotation.** Crop sizes here are the displayed size, after the source
   page's `/Rotate`. pdf.js renders the page as displayed, so the picture is
   already upright and is drawn with no rotation. Tested on a `/Rotate 90`
@@ -1290,7 +1406,7 @@ top. Nothing of the template is redrawn.
 Every crop, from every bank, digital or scanned, is drawn the same way
 (§2.1 item 11), once, when the worksheet modal opens (§4.4):
 
-1. **pdf.js renders the box alone,** at 300 dpi of the size it is printed on
+1. **pdf.js renders each box alone,** at 300 dpi of the size it is printed on
    the worksheet: §6.2's scale × 300 ÷ 72. The box's corners come from the
    stored PDF-space box through `convertToViewportPoint`. The viewport's
    `offsetX` and `offsetY` put the box's top-left corner at the canvas
@@ -1298,15 +1414,16 @@ Every crop, from every bank, digital or scanned, is drawn the same way
 2. **The canvas is encoded as JPEG** at quality 0.9 (`canvas.toBlob`). The
    modal holds it, and *Download PDF* embeds it with `embedJpg`, which copies
    the bytes unchanged.
-3. **One canvas serves every crop,** and is set to 0 × 0 once the last pick
-   is drawn, because Safari is slow to free canvas memory.
+3. **One canvas serves every box,** and is set to 0 × 0 once the last box is
+   drawn, because Safari is slow to free canvas memory.
 
 What this keeps out, and what it keeps:
 
-- Only the box's pixels reach the worksheet. No text, font, layer or image of
-  the source page goes with them, so nothing hidden can be extracted from a
-  crop. In testing, `pdftotext` on a worksheet printed only the template's
-  words (§6.1).
+- Only the boxes' pixels reach the worksheet. No text, font, layer or image
+  of the source page goes with them, so nothing hidden can be extracted from
+  a crop. In testing, before the source line, `pdftotext` on a worksheet
+  printed only the template's words; with it, it must print those and the
+  source lines, and nothing else (§6.1).
 - pdf.js draws the box as the page view drew it, so the worksheet shows what
   the in-charge cropped and the teacher picked. Every render goes through
   `renderRegion` with the display intent (§4.5), never `intent: "print"`,
@@ -1469,10 +1586,11 @@ The owner has not given volumes. The design handles the following:
 - **Crops:** many per page, about 4 to 12. A 300-page bank holds about 1,200
   to 3,600 questions. A level's bank-holding course keeps every bank of the
   level for good (§2.1 item 10), so it holds tens of thousands: 12 banks of
-  300 pages at 7 a page is 25,200. The reads measured in §3.5 take 34–60 ms
-  for the Questions page at that size, and 4–8 ms for each 1,000-row range of
-  one bank's crops; a 2,100-crop bank takes 3 ranges. Those are floors,
-  repeated on Supabase before anyone relies on them.
+  300 pages at 7 a page is 25,200. With 16% of questions holding a second
+  box, the reads measured in §3.5 take a teacher 46–50 ms for the Questions
+  page at that size, and 5–7 ms for each 1,000-row range of one bank's boxes;
+  a 2,100-question bank takes 3 ranges. Those are floors, repeated on
+  Supabase before anyone relies on them.
 - **Storage egress.** Every bank opened downloads the whole bank, in every
   tab. Egress per month is roughly bank opens × average bank size. For
   example, 10 teachers each opening 3 banks a working day, 22 days a month:
@@ -1499,14 +1617,15 @@ The owner has not given volumes. The design handles the following:
     browser fetches each file immediately; the URL's token is checked when the
     transfer starts.
   - There is no new bucket, no new storage policy and no write to Storage.
-- **Rows:** RLS and column grants (§3). Every write goes through
-  `save_page_crops`, which runs as the caller. No new role check is written in
+- **Rows:** RLS, column grants and the composite foreign key (§3). The app
+  writes only through `save_crops`, which runs as the caller. The grants also
+  let whoever may crop a bank write its rows directly, so the readers do not
+  rely on what `save_crops` keeps (§3.2). No new role check is written in
   TypeScript; there are three already. The capability flags only hide links.
-- **AI route:**
-  - It is behind the login redirect and checks the session and
-    `can_crop_file` itself.
-  - The key is server-only. The body is capped. Nothing is stored.
-  - The page image goes to Anthropic (§2.1 item 9).
+- **AI:** none for now (§2.1 item 9), so no page image leaves the browser. If
+  the route of §5.2 is built later, it is behind the login redirect, checks
+  the session and `can_crop_file` itself, keeps its key server-only, caps the
+  body and stores nothing.
 - **Worksheet:** it is built in the teacher's browser and never uploaded.
   Every crop is a picture of its box alone (§6.3), so the file carries
   nothing of a bank beyond the questions picked, wherever it is sent. It is
@@ -1525,14 +1644,16 @@ The owner has not given volumes. The design handles the following:
 | A bank locked by its publisher against printing or copying | Opened and cropped like any other. Its worksheet is not locked (§2.1 item 14). |
 | A question split across columns or pages, or sharing a figure | Up to four boxes per question, measured on the sample banks (§2.2, §9.2.1). |
 | A sideways page with no `/Rotate` | Shown sideways. Fix the PDF before cropping. A re-upload is a new file, so crops do not carry over. |
-| Two in-charges crop the same page at once | Duplicates are possible; delete one (§2.2). If one changes or removes a crop the other just removed, that save is refused whole, and *Reload page* shows what is saved (§4.3). |
-| A page save fails | Nothing is written. The drafts stay on screen with *Try again*. |
-| The tab crashes or is evicted | Only the page in hand is lost; every page left behind was saved. |
+| Two in-charges crop the same page at once | Duplicates are possible; delete one (§2.2). If both change which boxes one question has, the second save waits for the first and is then refused whole, and *Reload page* shows what is saved. A topic, corners or `pos` that both send is last-writer-wins; a topic only one of them changed is kept. Saves that overlap on two questions can deadlock instead: one fails with `40P01`, having written nothing, and the screen offers *Try again* (§3.4, §4.3). |
+| A save fails | Nothing is written. The drafts stay on screen, with *Try again* or *Reload page* (§4.3). |
+| A save's reply is lost and it is tried again | The new questions' ids are already used, so the retry is refused and nothing is written twice (§3.4). |
+| The tab crashes or is evicted | Only what was not yet saved is lost: at most the page in hand. |
 | A bank students can see | It cannot be cropped. Once cropped, its crops are locked until it is teacher-only again, and the Questions page marks it. |
 | A worksheet over 25 MB | It downloads, with a warning (§4.4). |
 | A bank is purged | Its crops go with it, and the purge is unaffected (§3.3). |
 | A picked question's bank went to Trash, or the crop was deleted | The modal drops it from the picks and says how many were removed. |
 | A bank's bytes are replaced in Storage under the same name | Every crop points at different content. §9.4 item 4. |
+| A box saved on a page past the bank's end (only by a crafted call) | The page view ignores it, and the modal drops its pick as removed (§4.3, §4.4). |
 
 ## 9. Tests, rollout, out of scope
 
@@ -1548,44 +1669,77 @@ commands.
 - `npm run build`, with dummy `NEXT_PUBLIC_SUPABASE_URL`,
   `NEXT_PUBLIC_SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY`.
 
-**SQL tests (new): `bash supabase/tests/run.sh`.** It needs `psql` and a
-local Postgres 16. It:
+**SQL tests: `PGHOST=localhost PGUSER=postgres bash supabase/tests/run.sh`.**
+It needs `psql` and a local Postgres 16. It:
 
-1. creates a scratch database;
+1. creates a uniquely named scratch database;
 2. applies `supabase/tests/shim.sql` (§3.6);
-3. applies every migration in order, and the new one a second time;
-4. runs `supabase/tests/questions.sql`, which fails on the first broken
-   `assert`;
-5. drops the database.
+3. applies every migration in order, and `20261017000009_questions.sql` a
+   second time;
+4. runs `supabase/tests/questions.sql`, which stops at the first failed
+   `assert`, so the script exits non-zero. Asserts are forced on
+   (`plpgsql.check_asserts=on`), whatever the caller or the server set;
+5. drops the database, however the run ended.
 
-**What it asserts:**
+**What it asserts,** section by section. After every successful save, it
+also checks that no question is left without a box and that every question's
+boxes run 1..n.
 
-- **Can read questions:** an admin, and a teacher or in-charge of the
-  file's course.
-- **Sees 0:** a student, an in-charge of another course, a teacher of
-  another course, and anon (permission denied). The same for topics.
-- **Refused inserts:**
-  - a teacher or a student, directly and through `save_page_crops`;
-  - another course's in-charge;
-  - a file students can see;
-  - a topic from another course;
-  - a forged `created_by`;
-  - a NaN, inverted or page-0 box.
-- **Refused updates:** to `file_id` or `page`, and to another course's topic.
-- **0 rows:** updates and deletes by a teacher, or by another course's
-  in-charge.
-- **All or nothing:** a `save_page_crops` call with one bad edit, removal or
-  box writes nothing.
-- **Allowed:** an in-charge's `save_page_crops` that edits one crop and
-  removes another writes both, and the removed row is gone, with no Trash
-  (§2.1 item 13).
-- **Trash:** questions are hidden from everyone, crops are refused, and
-  `can_crop_file` is false. After restore, everything is back.
-- **Student-visible bank:** teachers still read its crops,
-  `question_sources` says so, and nobody can change them.
-- **Purge:** a hard delete of a file, or of a folder, cascades to its
-  questions.
-- **View:** `question_sources` agrees with `questions` for every role.
+1. **A multi-box save:** one question with one box, and two questions sharing
+   a stimulus, copied as box 1 of each. `created_by` comes from its default
+   and the topic is stored.
+2. **Who sees what:** the counts of questions, boxes, banks in
+   `question_sources` and topics, per role (§3.6), and each role's
+   `question_course_ids()`. Anon is refused all four relations, and has no
+   execute grant on any of the four functions.
+3. **A question continued onto page 2:** its box 1, listed by id alone, keeps
+   its corners, and its bank then reads 3 questions on 2 pages.
+4. **Allowed:** a box on an earlier page than box 1; an edit that sends no
+   `topic_id`, which keeps the topic; a stimulus put in front of a saved
+   question, which renumbers its boxes; a kept box moved, sent with its own
+   page; the topic cleared by a null; an admin cropping in a course they are
+   not a member of.
+5. **A shared stimulus:** moved in both copies, which stay equal, also
+   through text; deleted from one question; deleted from both.
+6. **Deleting:** a question over two pages, and a question whose last box is
+   removed. Both go outright.
+7. **27 refused saves**, each refused for its stated reason and each followed
+   by a check that every row of both tables is unchanged. Among them: a fifth
+   box, on a saved or a new question; a question with no box; the same box
+   twice; an edit that leaves out, borrows or repeats a box, or keeps one it
+   removes; one question edited twice; edits and removals in another bank of
+   this course or another course; a removal listed twice or not there;
+   another course's topic, new or saved; inverted, NaN, page-0 and pageless
+   boxes; a kept box turned inside out, or sent with another page; a new box
+   with no `pos`.
+8. **Refused by who is asking:** `can_crop_file` per role and on the
+   student-visible `open.pdf`, even for an admin; saves by a teacher, a
+   student and another course's in-charge; direct inserts, updates and
+   deletes by them (refused, or 0 rows); the column grants (a box changing
+   question, file or page, a question changing file, a forged or rewritten
+   `created_by`); the composite foreign key; a NaN box inserted directly.
+9. **The bank made visible to students:** teachers still read its boxes and
+   `question_sources` says so; students still read none; nobody can add,
+   change or delete them.
+10. **Trash and restore,** through the real `soft_delete_file` and
+    `restore_batch`: hidden from everyone, admin included; `can_crop_file`
+    false for every role; every write refused; all back after restore.
+11. **Hard deletes:** of the file, its folder or the course cascade to
+    questions and boxes; a deleted topic leaves its questions with none.
+12. **`question_sources`** (questions, pages and `first_page`) agrees with the
+    tables for every role.
+13. **A box's policy is its question's:** every role sees exactly the boxes of
+    the questions it sees, normally, with the bank in Trash, and with it
+    visible to students.
+14. **A save retried after its reply was lost** is refused and writes nothing;
+    a new question with no id is refused.
+15. **The catalogue:** the exact table and column grants anon and
+    authenticated hold on the four relations, so a wider grant fails even
+    where a missing policy would still block it; no policy on the three
+    tables, and none of
+    `can_crop_file`, `topic_fits` or `save_crops`, calls `auth.uid()` outside
+    `(select auth.uid())`; `questions_select` and `question_boxes_select` are
+    the same text, apart from the table name.
 
 **Manual checks:**
 
@@ -1649,37 +1803,42 @@ local Postgres 16. It:
      - on the iPad, flip through 40 pages of the largest real scan with
        Safari's Web Inspector open: memory stays flat (§4.5,
        `page.cleanup()`).
-2. **PR 1, database:**
-   - the migration, in the multi-box shape step 1 chose (§2.2): §3.4's
-     tested draft is one box, and is redrawn with `question_boxes` first;
+2. **PR 1, database. Built:**
+   - the migration, in the multi-box shape step 1 chose (§2.2, §3.4);
    - `supabase/tests/{shim.sql,questions.sql,run.sh}`, `schema.sql`, the
      types and the docs;
-   - **apply it to Supabase** with the SQL editor (paste the file) or
-     `supabase db push`, *before* anything that reads it merges. Vercel
-     deploys the app only, never the database.
+   - **apply it to Supabase** by pasting the file into the SQL editor,
+     *before* anything that reads it merges. Vercel deploys the app only,
+     never the database. Not `supabase db push`, unless `supabase migration
+     list` shows every earlier migration applied on the remote: on a project
+     set up by pasting, a push replays them all, and `20260612000006` then
+     approves every pending signup. `DEPLOYMENT.md` §2 says how to repair the
+     history first.
 3. **PR 2, the page view:** cropping by hand, text-layer suggestions,
-   saving per page and picking, plus the `proxy.ts` matcher and the pdf.js
-   assets.
+   saving with `save_crops` and picking, plus the `proxy.ts` matcher and the
+   pdf.js assets.
    - The unmerged branch `claude/awesome-bell-udvk0q` also edits `proxy.ts`.
      Whichever lands second merges the other first.
 4. **PR 3, the Questions page and the worksheet:** the picks, the modal,
    compose and the two template PDFs.
-5. **AI**, only if a scanned bank is going to be cropped. None of the
-   centre's own banks has a scanned question page (§9.2.1). If the textbook
-   banks are not scans either, this step and PR 4 are not needed:
+5. **AI: not for now** (§2.1 item 9). If it is wanted later, only for a
+   scanned bank that is going to be cropped. None of the centre's own banks
+   has a scanned question page (§9.2.1). If the textbook banks are not scans
+   either, this step and PR 4 are not needed:
    - run the measurement in §5.2;
    - if a pair reached 98%, set `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` and,
      if measured, `ANTHROPIC_EFFORT` in Vercel, for Production and Preview,
      then redeploy;
    - PR 4 adds the route and the button. If no pair reached 98%, there is no
      PR 4.
-6. **An admin** creates one bank-holding course per level (§2.1 item 10):
+6. **An admin** creates the bank-holding courses (§2.1 item 10):
    - adds that year's teachers of the level as teacher, and the people who
      crop as in_charge;
-   - runs the topic snippet (§3.4) for it with the owner's list;
+   - runs the topic snippet (`DEPLOYMENT.md` step 8) for it with the owner's
+     list;
    - uploads the banks into teacher-only folders there (the crop screen
      refuses any other). A bank already in a class's course is uploaded again,
-     because a file cannot move between courses.
+     because the app cannot move a file between courses (§3.2).
 
    In-charges start cropping. Each new year, each bank-holding course's
    in_charge updates its teachers, and nothing else (§2.1 item 10).
@@ -1810,18 +1969,37 @@ them. On the rest, every number of each run is present exactly once.
    (`hooks/useUploader.ts:139-140`), so dropping the UPDATE policy and sending
    `x-upsert: false` loses nothing, and makes a file's bytes as immutable as
    its crops assume (§3.3).
+5. **An admin's reads of files are slow on a big project.** `files_select`
+   (`20260611000004_rls.sql`) calls `is_admin()` bare and `course_role()` up
+   to three times per row, so an admin's read of one bank's boxes took
+   60–80 ms per range at 10,000 files, against a teacher's 5–7 ms (§3.5).
+   Rewriting that one policy as `(select public.is_admin()) or case
+   public.course_role(course_id) …` is its own change, with its own tests.
+6. **`files` keeps its table-wide UPDATE grant,** and so does `folders`. No
+   migration narrows Supabase's default grant, `files_update`
+   (`20260611000004_rls.sql:89-92`) checks only that the caller is in_charge
+   of the new `course_id`, and `trg_file_eff` fires only on `update of
+   teacher_only, folder_id`. So an in_charge can set `eff_teacher_only =
+   false` on a file in a teacher-only folder: students see it until the
+   folder is next recomputed, and its crops lock, because `can_crop_file`
+   reads that column. Someone in_charge of two courses, or an admin, can
+   change a cropped bank's `course_id`, and its questions go to the other
+   course's teachers (§3.2). Neither lets a role do more than it could
+   already: an in_charge may clear `teacher_only` anyway. The fix is a
+   migration with its own tests: `revoke update on public.files from anon,
+   authenticated; grant update (name, folder_id, teacher_only, deleted_at,
+   deleted_by, delete_batch_id) on public.files to authenticated;`, the
+   columns `app/actions/files.ts`, `soft_delete_file` and `restore_batch`
+   write. The triggers and `recompute_subtree` still set `eff_teacher_only`,
+   because column privileges check only the statement's SET list. Then the
+   same for `folders`.
 
 ---
 
 *Evidence.* The research, the RLS probe and the compose tests ran on
-2026-10-17. What they ran on is kept in `docs/worksheets/`, as drafts that
+2026-10-17. What they ran on is kept in `docs/worksheets/`, as files that
 nothing applies or serves:
 
-- `questions.migration.sql`: the migration as tested;
-- `shim.sql`: the shim, printed in full in §3.6;
-- `questions.test.sql`: the probe, whose assertions are §9.1;
-- `run.sh`: applies every migration plus the draft twice, then runs the probe
-  (`PGPASSWORD=postgres PGHOST=localhost PGUSER=postgres bash docs/worksheets/run.sh`);
 - `template-{lesson,homework}.pdf`, with the HTML each was printed from;
 - `textlayer/propose.mjs`: §5.1's suggestions as measured on the sample
   banks (§9.2.1). It draws each page's proposals onto a PNG and prints them as
@@ -1835,9 +2013,13 @@ nothing applies or serves:
   with and without `page.cleanup()` (§4.5, §8.1). Each file's header says how
   to run it.
 
-PR 1 moves the migration into `supabase/migrations/` under a fresh version,
-and the shim, probe and runner to `supabase/tests/{shim.sql,questions.sql,run.sh}`.
-PR 3 moves `template-{lesson,homework}.pdf` to `public/worksheet/` (§6.1, §9.2
+The one-box drafts that used to sit here (`questions.migration.sql`,
+`questions.test.sql`, `shim.sql` and `run.sh`) were removed in PR 1, which
+superseded them: the shim is now `supabase/tests/shim.sql`, unchanged, and
+the migration, its tests and their runner were redrawn for several boxes as
+`supabase/migrations/20261017000009_questions.sql`,
+`supabase/tests/questions.sql` and `supabase/tests/run.sh`. The drafts are in
+the history at 9cbe177. PR 3 moves `template-{lesson,homework}.pdf` to `public/worksheet/` (§6.1, §9.2
 step 4). `raster/` and `textlayer/` are evidence only and move nowhere; PR 2
 writes §5.1 for the browser.
 

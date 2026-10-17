@@ -37,14 +37,37 @@ supabase db push          # applies supabase/migrations/* in order
 ```
 
 Verify: **Table editor** shows `profiles`, `courses`, `course_memberships`,
-`enrollment_requests`, `folders`, `files`; **Storage** shows a private
-`course-materials` bucket.
+`enrollment_requests`, `folders`, `files`, `question_topics`, `questions`,
+`question_boxes`; **Storage** shows a private `course-materials` bucket.
 
-**Already deployed before accounts & enrollment existed?** Run just the newest
+**Already deployed before accounts & enrollment existed?** Run just that
 migration —
 [`supabase/migrations/20260612000006_accounts_enrollment.sql`](./supabase/migrations/20260612000006_accounts_enrollment.sql)
 — in the SQL editor. It's idempotent and backfills every existing profile as
 `approved`.
+
+**Already deployed before the worksheet maker?** Run just
+[`supabase/migrations/20261017000009_questions.sql`](./supabase/migrations/20261017000009_questions.sql)
+— paste it into the SQL editor. It adds the three question tables, their
+policies, `save_crops` and the `question_sources` view, changes no existing
+table, and can be run twice. Apply it **before** deploying app code that reads
+it: Vercel deploys the app, never the database. Then add each bank-holding
+course's topics (step 8).
+
+> **Not `supabase db push` on a project set up by pasting.** Pasting SQL into
+> the editor (Option A, or the accounts migration above) records nothing in the
+> project's migration history, so a push replays every migration file first.
+> They all re-run cleanly, but `20260612000006` ends in
+> `update public.profiles set status = 'approved' where status = 'pending'`:
+> every signup waiting for approval is approved, with no error. Push only when
+> `supabase migration list` shows `20260611000001` to `20260612000008` as
+> applied on the remote. To get there from a pasted project, run
+> `supabase migration repair --status applied 20260611000001 20260611000002 20260611000003 20260611000004 20260611000005 20260612000006 20260612000007 20260612000008`
+> first.
+
+To check a migration locally first: `PGHOST=localhost PGUSER=postgres bash
+supabase/tests/run.sh` applies every migration to a scratch Postgres 16 and
+runs the SQL tests.
 
 ---
 
@@ -192,6 +215,36 @@ The app uses the `drive.file` scope, so it can only ever read files the user
 explicitly picks — it never sees the rest of their Drive. Downloads happen in
 the browser and then go through the normal upload pipeline (progress, resumable
 chunks, cancel).
+
+---
+
+## 8. Question topics (worksheet maker)
+
+Each bank-holding course has one fixed topic list, in the owner's order. There
+is no topic screen and the migration adds none, so re-running it never brings a
+deleted topic back. Once the course exists, run this in the SQL editor with its
+code and the owner's list:
+
+```sql
+insert into public.question_topics (course_id, name, position)
+select c.id, t.name, t.position
+from public.courses c,
+     (values ('Fractions', 1), ('Decimals', 2), ('Percentages', 3)) as t(name, position)
+where c.code = 'IM2'   -- or c.id = '<course id>' for a course with no code
+on conflict (course_id, name) do update set position = excluded.position
+returning name, position;
+```
+
+- The result lists the topics written. **An empty result means the code
+  matched no course.**
+- Each name appears once in the list; a name listed twice fails the whole
+  statement with "cannot affect row a second time", and nothing is written.
+- Running it again with the same list changes nothing; a reordered list moves
+  the topics.
+- A renamed topic would be added as a new one. Rename it in place instead:
+  `update public.question_topics set name = '…' where id = '…';`
+- Deleting a topic (`delete from public.question_topics where id = '…';`) keeps
+  its questions and leaves them with no topic.
 
 ---
 

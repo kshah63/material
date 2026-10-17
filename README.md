@@ -24,8 +24,10 @@ deletes.
   the UI.
 - **Bulk & resumable uploads** — drop whole folders; large files resume on a
   dropped connection (TUS).
-- **Soft delete → Trash → 30-day purge.** Nobody can hard-delete; the only
-  physical delete is an automated service-role job.
+- **Soft delete → Trash → 30-day purge.** Nobody can hard-delete a file or a
+  folder; the only physical delete is an automated service-role job. A cropped
+  question and its boxes are only boxes on a bank's pages, so they are deleted
+  outright, with no Trash.
 
 ### Permission matrix (per course)
 
@@ -70,8 +72,9 @@ lib/
   queries.ts              server-side reads (RLS-scoped)
   upload/                 folder-tree capture + TUS upload
 supabase/
-  migrations/             schema · functions · triggers · rls · storage
+  migrations/             schema · functions · triggers · rls · storage · questions
   schema.sql              all migrations concatenated (one-shot paste)
+  tests/run.sh            applies every migration to a scratch Postgres, runs the SQL tests
   functions/purge/        Edge Function alternative to the cron route
 ```
 
