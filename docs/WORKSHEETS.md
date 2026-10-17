@@ -1558,15 +1558,19 @@ local Postgres 16. It:
 ---
 
 *Evidence.* The research, the RLS probe and the compose tests ran on
-2026-10-17 in a session scratchpad that will not be kept. The repo paths they
-become are: the shim, `supabase/tests/shim.sql` (printed in full in §3.6);
-the probe, `supabase/tests/questions.sql` (its assertions are §9.1); the
-template PDFs, `public/worksheet/template-{lesson,homework}.pdf`. Until those
-are committed, the copies are at
-`/tmp/claude-0/-home-user/b8ff5489-9a06-5194-9ebd-bb6175d94e88/scratchpad/`:
-`wsrev2/sql/` (the migration as tested, the shim and the probe),
-`out/mathvision-a4-{lesson,homework}.pdf` and `out/a4-{lesson,homework}.html`
-(the template). Copy them into the repo before that session ends.
+2026-10-17. What they ran on is kept in `docs/worksheets/`, as drafts that
+nothing applies or serves:
+
+- `questions.migration.sql`: the migration as tested;
+- `shim.sql`: the shim, printed in full in §3.6;
+- `questions.test.sql`: the probe, whose assertions are §9.1;
+- `run.sh`: applies every migration plus the draft twice, then runs the probe
+  (`PGPASSWORD=postgres PGHOST=localhost PGUSER=postgres bash docs/worksheets/run.sh`);
+- `template-{lesson,homework}.pdf`, with the HTML each was printed from.
+
+PR 1 moves them to their real paths: the migration into `supabase/migrations/`
+under a fresh version, `supabase/tests/{shim.sql,questions.sql,run.sh}`, and
+`public/worksheet/template-{lesson,homework}.pdf`.
 
 ## Review notes
 
