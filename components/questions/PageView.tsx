@@ -319,8 +319,11 @@ export function PageView(props: PageViewProps) {
   // The toolbar and the answers notice sit above the page, outside its scroll.
   // When they change height (the bank's suggestions arriving, a suggestion
   // accepted), the page is scrolled by as much, so it stays where it was under
-  // the pointer, and a drag begun meanwhile ends where it was aimed.
+  // the pointer, and a drag begun meanwhile ends where it was aimed. A page
+  // just turned to is the exception: it opens at its top (goTo), and stays
+  // there through the toolbar's changes until the next press.
   const aboveRef = useRef<HTMLDivElement>(null);
+  const turned = useRef(false);
   const aboveShown = cropping && !!doc;
   useEffect(() => {
     const el = aboveRef.current;
@@ -329,7 +332,7 @@ export function PageView(props: PageViewProps) {
     let h = el.getBoundingClientRect().height;
     const ro = new ResizeObserver(() => {
       const next = el.getBoundingClientRect().height;
-      scroller.scrollTop += next - h;
+      if (!turned.current) scroller.scrollTop += next - h;
       h = next;
     });
     ro.observe(el);
@@ -433,13 +436,11 @@ export function PageView(props: PageViewProps) {
   // cropped, or a "?" one): hidden until the bank is opened again.
   const [skipped, setSkipped] = useState<ReadonlySet<string>>(() => new Set());
   // Hidden where a box already is, saved or drawn here: an accepted one included.
-  const offered = useMemo(
-    () =>
-      bankFound && shownPage !== null
-        ? uncropped(crops, shownPage, offersOn(bankFound.pages, shownPage)).filter((s) => !skipped.has(s.id))
-        : [],
-    [bankFound, shownPage, crops, skipped],
+  const uncovered = useMemo(
+    () => (bankFound && shownPage !== null ? uncropped(crops, shownPage, offersOn(bankFound.pages, shownPage)) : []),
+    [bankFound, shownPage, crops],
   );
+  const offered = useMemo(() => uncovered.filter((s) => !skipped.has(s.id)), [uncovered, skipped]);
   // Accept all (n) takes every suggestion without a "?": a continuation always
   // has one (R51), so each is looked at on its own (§4.3).
   const sure = useMemo(() => offered.filter((s) => !s.check && s.type !== "continuation"), [offered]);
@@ -539,6 +540,11 @@ export function PageView(props: PageViewProps) {
   };
   const goTo = (p: number, select: string | null = null, topic = topicId) => {
     if (cropping) void save();
+    // A new page opens at its top, not as far down as the last one was scrolled.
+    if (p !== page && scrollRef.current) {
+      scrollRef.current.scrollTop = 0;
+      turned.current = true;
+    }
     setPageNo(p);
     // A selected stimulus stays in hand on the next page; anything else is let go.
     setSel(select ?? (sel !== null && sel === stim ? sel : null));
@@ -870,7 +876,13 @@ export function PageView(props: PageViewProps) {
   const dupeUnderSel = selIsStim && sel !== null ? (users.get(sel) ?? []).filter((id) => dupes.has(id)) : [];
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col" style={{ background: "var(--paper)" }}>
+    <div
+      className="fixed inset-0 z-50 flex flex-col"
+      style={{ background: "var(--paper)" }}
+      onPointerDown={() => {
+        turned.current = false;
+      }}
+    >
       <header
         className="flex items-center gap-x-3 gap-y-2 flex-wrap"
         style={{
@@ -1162,7 +1174,11 @@ export function PageView(props: PageViewProps) {
                                 ? "The PDF reader could not draw this page, so nothing is suggested on it. Drag to draw a box."
                                 : found.answers && found.proposals.length === 0
                                   ? "This page is answers: nothing is suggested on it. Drag to draw a box."
-                                  : "No suggestions on this page. Drag to draw a box."}
+                                  : found.proposals.length === 0
+                                    ? "No suggestions on this page. Drag to draw a box."
+                                    : uncovered.length === 0
+                                      ? "Every suggestion here is accepted. Drag to draw a box."
+                                      : "Every suggestion here is accepted or skipped. Drag to draw a box."}
                 {items.length > 0 && !saving && failure?.kind !== "reload" && " Click a box to change it."}
                 <span className="hidden pointer-coarse:inline"> Two fingers scroll.</span>
               </span>

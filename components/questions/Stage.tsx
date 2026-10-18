@@ -14,9 +14,11 @@ import type { ViewRect } from "@/lib/worksheet/source";
 // tap to select, tap empty page to deselect. A suggestion (§5.1) is empty page
 // that a tap accepts: a drag across it still draws. One marked with the amber
 // "?" says why on hover, and a tap on it asks first (the page view's toolbar).
-// Two fingers scroll the page, because one finger draws. Every box is also a
-// button, so Tab reaches it and Enter selects it, or accepts a suggestion; in
-// pick mode a tap or Enter on a box picks its question.
+// Two fingers scroll the page, because one finger draws. A box drawn or resized
+// near the top or bottom of the page's scroll scrolls it, so a box taller than
+// the window is one drag. Every box is also a button, so Tab reaches it and
+// Enter selects it, or accepts a suggestion; in pick mode a tap or Enter on a
+// box picks its question.
 
 export interface StageItem {
   id: string;
@@ -59,7 +61,7 @@ interface Edges {
 type Gesture =
   | { kind: "draw"; start: Point; accept: string | null; moved: boolean }
   | { kind: "move"; id: string; start: Point; orig: ViewRect; moved: boolean }
-  | { kind: "resize"; id: string; orig: ViewRect; edges: Edges }
+  | { kind: "resize"; id: string; start: Point; orig: ViewRect; edges: Edges; moved: boolean }
   | { kind: "pan" };
 
 // How close to an edge, in screen pixels, grabs it: a fingertip needs more.
@@ -67,6 +69,10 @@ const GRAB_PX: Record<string, number> = { mouse: 7, pen: 9, touch: 20 };
 // How far a press travels, in screen pixels, before it is a drag and not a tap.
 const SLOP_PX: Record<string, number> = { mouse: 3, pen: 4, touch: 8 };
 const HANDLE_PX = 9;
+// A draw or resize within this many screen pixels of the scroller's top or
+// bottom edge scrolls it, faster the deeper the pointer is, up to STEP_PX a frame.
+const EDGE_PX = 40;
+const STEP_PX = 20;
 
 const area = (v: ViewRect) => v.w * v.h;
 const inside = (v: ViewRect, p: Point) =>
@@ -141,7 +147,7 @@ export function Stage({
   const clampX = (x: number) => Math.min(width, Math.max(0, x));
   const clampY = (y: number) => Math.min(height, Math.max(0, y));
 
-  function toPage(e: React.PointerEvent): Point {
+  function toPage(e: { clientX: number; clientY: number }): Point {
     const r = stageRef.current!.getBoundingClientRect();
     return {
       x: clampX(((e.clientX - r.left) / r.width) * width),
@@ -170,6 +176,45 @@ export function Stage({
   function cancel() {
     gesture.current = null;
     setLive(null);
+    stopScroll();
+  }
+
+  // --- scrolling at the edge ------------------------------------------------------
+  // The pointer the scroll follows, and the frame it asked for. A frame finds the
+  // scroller gone once the page view has closed, and stops there.
+  const edge = useRef<{ clientX: number; clientY: number; pointerType: string; frame: number } | null>(null);
+
+  function stopScroll() {
+    if (edge.current) cancelAnimationFrame(edge.current.frame);
+    edge.current = null;
+  }
+
+  /** Screen pixels to scroll this frame for a pointer at clientY, up negative; 0 away from the edges. */
+  function edgeStep(clientY: number): number {
+    const s = scroller.current;
+    if (!s) return 0;
+    const r = s.getBoundingClientRect();
+    const up = r.top + EDGE_PX - clientY;
+    const down = clientY - (r.bottom - EDGE_PX);
+    const depth = Math.max(up, down);
+    if (depth <= 0) return 0;
+    const step = Math.min(STEP_PX, Math.ceil((depth / EDGE_PX) * STEP_PX));
+    return up >= down ? -step : step;
+  }
+
+  // One frame: the page scrolls under a still pointer, and the box being drawn
+  // or resized follows it to the page's new place under the pointer.
+  function scrollFrame() {
+    const at = edge.current;
+    const s = scroller.current;
+    const g = gesture.current;
+    if (!at || !s || (g?.kind !== "draw" && g?.kind !== "resize")) return stopScroll();
+    const before = s.scrollTop;
+    s.scrollBy(0, edgeStep(at.clientY));
+    // The scroll's end, or a pointer no longer at the edge.
+    if (s.scrollTop === before) return stopScroll();
+    follow(g, toPage(at), at.pointerType);
+    at.frame = requestAnimationFrame(scrollFrame);
   }
 
   function onPointerDown(e: React.PointerEvent<HTMLDivElement>) {
@@ -193,7 +238,7 @@ export function Stage({
     const h = hit(p, e.pointerType);
     const it = h ? items.find((i) => i.id === h.id)! : null;
     if (h && it && h.edges) {
-      gesture.current = { kind: "resize", id: h.id, orig: it.v, edges: h.edges };
+      gesture.current = { kind: "resize", id: h.id, start: p, orig: it.v, edges: h.edges, moved: false };
     } else if (h && it && !h.suggestion) {
       if (h.id !== selected) onSelect(h.id);
       gesture.current = { kind: "move", id: h.id, start: p, orig: it.v, moved: false };
@@ -203,6 +248,8 @@ export function Stage({
   }
 
   function onPointerMove(e: React.PointerEvent<HTMLDivElement>) {
+    // Asked again below, from this render, while the pointer is still at an edge.
+    stopScroll();
     const g = gesture.current;
     const last = pointers.current.get(e.pointerId);
     if (g?.kind === "pan" && last) {
@@ -219,8 +266,19 @@ export function Stage({
       setCursor(!h ? "crosshair" : h.edges ? cursorFor(h.edges) : h.id === selected ? "move" : "pointer");
       return;
     }
+    follow(g, p, e.pointerType);
+    // Once the press is a drag, so a tap near the edge is still a tap.
+    if ((g.kind === "draw" || g.kind === "resize") && g.moved && edgeStep(e.clientY) !== 0) {
+      const { clientX, clientY, pointerType } = e;
+      edge.current = { clientX, clientY, pointerType, frame: requestAnimationFrame(scrollFrame) };
+    }
+  }
+
+  /** The box being drawn, moved or resized, for the pointer at p. */
+  function follow(g: Gesture, p: Point, pointerType: string) {
+    const slop = (SLOP_PX[pointerType] ?? 3) * unit;
     if (g.kind === "draw") {
-      if (Math.hypot(p.x - g.start.x, p.y - g.start.y) >= (SLOP_PX[e.pointerType] ?? 3) * unit) g.moved = true;
+      if (Math.hypot(p.x - g.start.x, p.y - g.start.y) >= slop) g.moved = true;
       setLive({
         id: null,
         v: {
@@ -233,12 +291,13 @@ export function Stage({
     } else if (g.kind === "move") {
       const dx = p.x - g.start.x;
       const dy = p.y - g.start.y;
-      if (!g.moved && Math.hypot(dx, dy) < (SLOP_PX[e.pointerType] ?? 3) * unit) return;
+      if (!g.moved && Math.hypot(dx, dy) < slop) return;
       g.moved = true;
       const x = Math.min(width - g.orig.w, Math.max(0, g.orig.x + dx));
       const y = Math.min(height - g.orig.h, Math.max(0, g.orig.y + dy));
       setLive({ id: g.id, v: { ...g.orig, x, y } });
     } else if (g.kind === "resize") {
+      if (Math.hypot(p.x - g.start.x, p.y - g.start.y) >= slop) g.moved = true;
       const o = g.orig;
       let x0 = o.x;
       let y0 = o.y;
