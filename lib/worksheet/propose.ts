@@ -203,7 +203,8 @@ const marksLine = (t: string) => MARKS_ONLY.test(t) || TOTAL_MARKS.test(t);
 const ENDS_MARKS = /(?:\[\s*\d{1,2}\s*(?:marks?)?\s*\]|\(\s*total\s*:?\s*\d{1,3}\s*marks?\s*\))$/i;
 const BARE_SUB = /^\(?(?:[a-h]|i{1,3}|iv|vi{0,3}|ix|x)\)?(?:\s+\(?(?:i{1,3}|iv|vi{0,3}|ix|x)\)?)?$/;
 
-const CONTINUES = "continues the question above it";
+/** The "?" every continuation carries (R51): it is accepted onto its question, which the screen checks. */
+export const CONTINUES = "continues the question above it";
 const IMAGE_SPLIT = "an image spans this box and the next";
 const HOLDS_LIST = "holds a numbered list that is not proposed";
 const OVERLAPS = "overlaps another question's box";

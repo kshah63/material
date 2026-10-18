@@ -14,9 +14,10 @@ import { PageView } from "@/components/questions/PageView";
 export const dynamic = "force-dynamic";
 
 /**
- * The page view (docs/WORKSHEETS.md §4.3): one bank, page by page, with its
- * saved crops. Managers crop on a bank can_crop_file allows; everyone else, and
- * a manager on a bank students can see, picks. ?page= is the page to open, and
+ * The page view (docs/WORKSHEETS.md §4.3): one bank with its saved crops.
+ * Managers crop on a bank can_crop_file allows, every page in one scroll (All
+ * pages) unless ?page= asks for One page; everyone else, and a manager on a
+ * bank students can see, picks, page by page. ?page= is the page to open, and
  * ?topic= a topic to narrow it to, from the Questions page's filter.
  */
 export default async function QuestionsPageView({
