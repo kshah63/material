@@ -82,6 +82,23 @@ const OWN_MESSAGES = new Set([
 ]);
 const BOX_FIELDS = ["page", "x0", "y0", "x1", "y1", "pos"] as const;
 
+/** Admin, or in_charge of the course: who may download (getViewUrl's rule). */
+async function canDownloadIn(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+  courseId: string,
+): Promise<boolean> {
+  const { data: profile } = await supabase.from("profiles").select("app_role").eq("id", userId).single();
+  if (profile?.app_role === "admin") return true;
+  const { data: membership } = await supabase
+    .from("course_memberships")
+    .select("role")
+    .eq("course_id", courseId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  return membership?.role === "in_charge";
+}
+
 function invalid(error: string): SaveFailure {
   return { ok: false, kind: "invalid", code: null, error };
 }
@@ -263,6 +280,11 @@ export async function preparePicks(courseId: string, ids: string[]): Promise<Pre
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "You're signed out. Reload the page to sign in again.", retry: false };
   if (typeof courseId !== "string" || !UUID.test(courseId)) return { ok: false, error: "Bad course.", retry: false };
+  // A worksheet is a download, and downloads are for admins and the course's
+  // in_charge only, as in getViewUrl (the owner, 2026-10-18).
+  if (!(await canDownloadIn(supabase, user.id, courseId))) {
+    return { ok: false, error: "Only in-charges and admins can make worksheets.", retry: false };
+  }
   // The tab's picks are strings (usePicks keeps only those); anything else is a crafted call.
   if (!Array.isArray(ids) || ids.some((id) => typeof id !== "string")) {
     return { ok: false, error: "Bad picks.", retry: false };

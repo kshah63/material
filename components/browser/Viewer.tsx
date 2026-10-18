@@ -66,7 +66,7 @@ export function Viewer({
           )}
         </div>
         <div className="flex items-center gap-2">
-          {/* Students get no download link. */}
+          {/* Only admins and the course's in-charges get a download link. */}
           {downloadUrl && (
             <a
               href={downloadUrl}

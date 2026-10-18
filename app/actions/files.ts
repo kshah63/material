@@ -155,7 +155,7 @@ export async function softDeleteFile(fileId: string, courseId: string) {
  * session — if RLS returns the row they're allowed; the service role only signs.
  * This is the single point where teacher-only is enforced for viewing.
  *
- * Downloading is for admins and the course's in_charge and teachers: students
+ * Downloading is for admins and the course's in_charge: teachers and students
  * get a view-only URL and no download link. (This removes the affordance, not
  * the physical possibility — anything a browser can display can be saved.)
  */
@@ -189,8 +189,7 @@ export async function getViewUrl(fileId: string) {
         .eq("course_id", file.course_id)
         .eq("user_id", user.id)
         .maybeSingle();
-      canDownload =
-        membership?.role === "in_charge" || membership?.role === "teacher";
+      canDownload = membership?.role === "in_charge";
     }
   }
 

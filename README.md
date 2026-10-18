@@ -38,7 +38,8 @@ deletes.
 | Upload / create / rename / move / delete | — | — | ✓ | ✓ |
 | View Trash + restore | — | — | ✓ | ✓ |
 | Crop questions from a teacher-only bank | — | — | ✓ | ✓ |
-| Pick questions, download a worksheet | — | ✓ | ✓ | ✓ |
+| Browse cropped questions | — | ✓ | ✓ | ✓ |
+| Download a file, make a worksheet | — | — | ✓ | ✓ |
 | Manage members / courses / invites | — | — | — | ✓ |
 
 ---
@@ -110,10 +111,10 @@ DEPLOYMENT.md → "Bootstrap the first admin".
 
 These follow the spec's recommendations; each is a small change to revisit later:
 
-- **Staff download, students view.** Admins and a course's in-charges and
-  teachers get a Download button; students get a view-only preview with the
-  browser's PDF toolbar hidden. That removes the button, not the bytes: true
-  view-only (DRM) is out of scope.
+- **In-charges download, everyone else views.** Admins and a course's
+  in-charges get a Download button and make worksheets; teachers and students
+  get a view-only preview with the browser's PDF toolbar hidden. That removes
+  the button, not the bytes: true view-only (DRM) is out of scope.
 - **Keep-both naming.** Re-uploading a duplicate name appends ` (2)`.
 - **PDF-only.** Enforced on upload and at the Storage bucket. Loosen by editing
   the mime filter in `lib/upload/tree.ts` and the bucket's `allowed_mime_types`.

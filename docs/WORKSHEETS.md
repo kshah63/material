@@ -109,6 +109,15 @@ cannot use.
      in-charges, on every file they can open, teacher-only folders and mark
      schemes included (d71febe, merged). Students still only view. So a
      worksheet no longer relaxes anything for the teacher.
+   - *Reversed on 2026-10-18:* *"only one category of teachers (DD- global
+     online) can download (apart from in charges and admin) since they are
+     the ones taking online lessons"*, then for the portal *"just restrict for
+     everyone except in charges"*. Downloads and worksheets are for admins and
+     a course's in-charges again: `getViewUrl` gives teachers a view-only
+     preview, `preparePicks` refuses a worksheet to anyone else, and the
+     Questions page shows teachers no Make worksheet. The Global Online rule
+     is for when materials move into mv-app, whose staff profiles carry that
+     employment type.
    - *Settled after that:* a booklet, a finished paper or a worksheet goes
      into the child's Pencil Space with one page per board. *"Yes sure one
      page per board is good."* Page 12 of a booklet is then board 12, and the
@@ -1289,6 +1298,64 @@ what the text leaves open:
   "?" asking and *Accept all*, at 1000, 1180 and 1440 px, and a box dragged
   across the arrival ends where the pointer does. At the very top of the
   scroll a toolbar that shrinks can still move the page up.
+
+**As built (the one-page fixes).** Three changes from the UX study of
+cropping and picking, in `PageView.tsx` and `Stage.tsx`, with no server or
+database change:
+
+- **A page opens at its top.** `goTo` sets the scroll to 0 whenever the page
+  changes: Next, Previous, the page select, a topic that leaves the page, or
+  a toolbar button to a question's other page, in crop and pick mode alike.
+  It used to keep the last page's scroll, so a page left 500 px down opened
+  500 px down and began with a scroll back up. Until the next press anywhere
+  on the screen, the toolbar's changes as the page turns (the new page's
+  suggestions, a question in hand gaining "box 1 on p. 9") do not scroll the
+  page by their height either; that had left hl-book-b pp. 10, 15 and 16
+  opening 41 px down. From the next press on, the page stays put under the
+  pointer as above.
+- **A drag at the edge scrolls the page.** While a box is drawn or resized
+  with the pointer within 40 px of the scroll area's top or bottom edge, or
+  past it, the page scrolls every animation frame, faster the deeper the
+  pointer is (half a pixel for each pixel of depth, rounded up, at most
+  20 px a frame), and the box follows the page under a still pointer. It
+  starts only once the press has moved past the drag threshold, so a tap
+  near the edge still accepts or selects, and it stops at the scroll's end,
+  when the pointer leaves the edge, and on release. Moving a box does not
+  scroll. A box taller than the window is one drag.
+- **A page whose suggestions are all taken** reads "Every suggestion here is
+  accepted. Drag to draw a box." (each has a box over it, saved or drawn
+  here), or "Every suggestion here is accepted or skipped. Drag to draw a
+  box." when some were skipped. "No suggestions on this page. Drag to draw a
+  box." is now said only of a page that had none, as the states above say;
+  it used to be said of both.
+
+Measured in the study's browser harness (1440 × 900 at 2x, with its
+counting rules: a scroll is one wheel gesture, and the estimate is its model
+of a person's own time), on the same flows before and after:
+
+| Flow | Scrolls | Clicks | Drags | Estimate |
+|---|---|---|---|---|
+| Crop IM3 U4 booklet A: 37 pages, 67 questions | 71 → 36 | 121, unchanged | none | 337 → 302 s |
+| Crop IM2 U4 worksheet 1: 32 pages, 93 questions | 61 → 31 | 80, unchanged | none | 241 → 211 s |
+| Crop hl-book-b pp. 1–16: 69 questions | 31 → 14 | 64, unchanged | 6 → 3 | 160 → 139 s |
+| A teacher's 10 questions from 3 banks | 35 → 19 | 38, unchanged | none | 142 → 126 s |
+| Every Logarithms question (11) | 13 → 7 | 23, unchanged | none | 73 → 67 s |
+| Every Exponential growth question (62) | 54 → 28 | 96, unchanged | none | 323 → 297 s |
+
+All 127 scrolls back up to a page's top are gone; what is left is scrolling
+down to see a page's foot or to reach a question. hl-book-b's three boxes
+drawn by hand, on pp. 10, 15 and 16, are one drag each where each was a
+drag, a scroll and a second drag on its foot. What each flow made is
+unchanged: the same questions, boxes and topics saved (the hand-drawn boxes
+the same to 0.1 pt), and the same worksheets ("10 questions on 10 pages",
+"11 questions on 11 pages", "62 questions on 49 pages"). Also checked: the
+scroll is 0 after Next, Previous and the page select from 500 px down in
+crop mode, and after Next in pick mode; a draw held at the top edge scrolled
+the page up 375 px and ended at the pointer; a resize held at the foot
+scrolled 376 px and ended at the pointer; a press with a pixel of jitter on
+a suggestion in the bottom 40 px accepted it without scrolling; and *Accept
+all* on a page just turned to and scrolled 300 px down left the page where
+it was.
 
 ### 4.4 Make worksheet
 
