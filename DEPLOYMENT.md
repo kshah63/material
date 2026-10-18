@@ -57,7 +57,7 @@ course's topics (step 8).
 > **Not `supabase db push` on a project set up by pasting.** Pasting SQL into
 > the editor (Option A, or the accounts migration above) records nothing in the
 > project's migration history, so a push replays every migration file first.
-> They all re-run cleanly, but `20260612000006` ends in
+> They all re-run cleanly, but `20260612000006` contains
 > `update public.profiles set status = 'approved' where status = 'pending'`:
 > every signup waiting for approval is approved, with no error. Push only when
 > `supabase migration list` shows `20260611000001` to `20260612000008` as
@@ -67,7 +67,9 @@ course's topics (step 8).
 
 To check a migration locally first: `PGHOST=localhost PGUSER=postgres bash
 supabase/tests/run.sh` applies every migration to a scratch Postgres 16 and
-runs the SQL tests.
+runs the SQL tests. It needs `psql`, a local Postgres 16, Node 22.18 or newer
+and `npm install`: its last two steps run in Node, which imports the app's
+TypeScript directly and reads `pdf-lib` from `node_modules`.
 
 ---
 

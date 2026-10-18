@@ -74,13 +74,16 @@ export function contentArea(size: PageSize) {
 
 /**
  * The one scale a question's boxes print at (§6.2), and whether it fits one page.
- * Its width sets it: min(1.25, 180 mm ÷ its widest box), and no page height
- * shrinks it, so a question a little under a page tall prints at the scale of
- * one a little over. A question that does not fit one page at that scale, its
- * source line included, flows over pages. Only a box too tall for a page by
- * itself brings its question's scale down, until that box fits a page with the
- * source line under it, so no box is ever cut; a box no taller than an A4 page
- * then still prints at 81% of its size or more.
+ * Its width sets it: min(1.25, 180 mm ÷ its widest box). Where that enlarges a
+ * question that fits one page at the bank's own size, its source line included,
+ * past a page, it prints at the largest scale that fits, 1 or more, so that the
+ * enlargement never puts a stimulus on one page and its question on the next.
+ * No page height shrinks it further, so a question a little under a page tall
+ * prints at nearly the scale of one a little over. A question that does not fit
+ * one page flows over pages. Only a box too tall for a page by itself brings its
+ * question's scale down, until that box fits a page with the source line under
+ * it, so no box is ever cut; a box no taller than an A4 page then still prints
+ * at 81% of its size or more.
  */
 export function scaleOf(boxes: BoxSize[], areaHeight: number): { scale: number; fits: boolean } {
   const widest = Math.max(...boxes.map((b) => b.w));
@@ -88,13 +91,15 @@ export function scaleOf(boxes: BoxSize[], areaHeight: number): { scale: number; 
   const stacked = boxes.reduce((t, b) => t + b.h, 0);
   const scale = Math.min(MAX_SCALE, WIDTH / widest);
   if (stacked * scale + LINE_BLOCK <= areaHeight + EPS) return { scale, fits: true };
+  const fit = (areaHeight - LINE_BLOCK) / stacked;
+  if (fit >= 1) return { scale: fit, fits: true };
   return { scale: Math.min(scale, (areaHeight - LINE_BLOCK) / tallest), fits: false };
 }
 
 /**
  * Where every question goes, in print order (§6.2). A question's boxes stack in
  * box_no order, left-aligned, one under another with no gap (a box already
- * carries 4 pt of margin round its ink, §5.1 rule 7), and its source line
+ * carries 4 pt of margin round its ink, §5.1 box edges), and its source line
  * follows 2 mm under the last box. Each question starts a page of its own, at
  * the top of the content area, except the second of two short questions in a
  * row, which starts at the area's midpoint. A box that does not fit under the

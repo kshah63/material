@@ -24,7 +24,8 @@ import {
 } from "@/lib/worksheet/layout";
 import { BankError, closeBank, imagesFailed, isCancelled, openBank } from "@/lib/worksheet/source";
 
-// Pencil Files' limit, until the drag-in's own is measured (§9.2 step 1).
+// Pencil Files' limit, until the drag-in's own is measured (§9.2 step 7), in
+// formatBytes's units, so that the warning agrees with the size the toast shows.
 const PENCIL_LIMIT = 25 * 1024 * 1024;
 const BIG_BANK = 10 * 1024 * 1024;
 // The thumbnail column stands for the content area's 180 mm.

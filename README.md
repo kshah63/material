@@ -91,7 +91,9 @@ supabase/
    cp .env.example .env.local
    ```
 2. Apply the database schema to your Supabase project (SQL editor → paste
-   `supabase/schema.sql`, or `supabase db push`). See DEPLOYMENT.md.
+   `supabase/schema.sql`). Read DEPLOYMENT.md §2 before using `supabase db
+   push`: on a project set up by pasting, a push approves every pending
+   signup.
 3. Run:
    ```bash
    npm install

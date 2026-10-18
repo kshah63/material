@@ -1,8 +1,9 @@
 // Banks in the browser (docs/WORKSHEETS.md §4.5, §6.3): pdf.js's setup, one open
 // bank per file per tab, drawing a box of a page, the two conversions between
-// PDF space and the screen, and a page's text-layer suggestions (§5.1), whose
+// PDF space and the screen, and a bank's text-layer suggestions (§5.1), whose
 // rules are lib/worksheet/propose.ts. Client only: pdf.js is loaded with
 // import() on first use, so nothing here runs during server rendering.
+// docs/worksheets/textlayer/compare.mjs also runs suggestFile, in Node.
 import type {
   PDFDocumentProxy,
   PDFPageProxy,
@@ -11,13 +12,17 @@ import type {
 } from "pdfjs-dist/legacy/build/pdf.mjs";
 import {
   INK_SCALE,
-  endsQuestions,
-  imageCoverage,
-  pageKind,
-  propose,
-  readText,
-  type PageKind,
-  type Proposal,
+  finishFile,
+  isBoldFont,
+  needsOperators,
+  preRead,
+  proposePage,
+  readOperators,
+  startFile,
+  type FileSuggestions,
+  type OpCodes,
+  type PageInput,
+  type PreLine,
 } from "./propose";
 
 type PdfJs = typeof import("pdfjs-dist/legacy/build/pdf.mjs");
@@ -159,6 +164,9 @@ async function load(entry: OpenBank, signUrl: () => Promise<string>): Promise<PD
   entry.bytes = data.byteLength;
   const task = pdfjs.getDocument({
     data,
+    // Fonts keep their names ("TimesNewRomanPS-BoldMT"), which is how the
+    // suggestions tell a bold heading (§5.1, isBoldFont).
+    fontExtraProperties: true,
     wasmUrl: `${ASSETS}wasm/`,
     cMapUrl: `${ASSETS}cmaps/`,
     standardFontDataUrl: `${ASSETS}standard_fonts/`,
@@ -302,32 +310,25 @@ export function toPdfBox(viewport: PageViewport, rect: ViewRect): PdfBox {
 }
 
 /**
- * The only caller of page.render (§4.5): draws one box of a page onto the
- * canvas, at `scale` canvas pixels per point, only as much of it as is on the
- * page (clipToPage). The viewport's offsets put the box's top-left corner at
- * the canvas origin, and the canvas is sized to the box. pageBox(page) draws
- * the whole page. pdf.js's defaults are kept on
- * purpose: the display intent and the default annotation mode, so it draws what
- * the page view showed; the print intent turns on layers a teacher edition hides
- * on screen (§6.3). `recordImages` also has pdf.js note where the page's images
- * fall (page.imageCoordinates), which is how a scanned page is told (§5.1); it
- * changes nothing drawn. Cancel the returned task when the result is no longer
- * wanted; its promise then rejects with a RenderingCancelledException.
+ * The only caller of page.render (§4.5) but suggestFile, which draws whole
+ * pages for their ink: draws one box of a page onto the canvas, at `scale`
+ * canvas pixels per point, only as much of it as is on the page (clipToPage).
+ * The viewport's offsets put the box's top-left corner at the canvas origin,
+ * and the canvas is sized to the box. pageBox(page) draws the whole page.
+ * pdf.js's defaults are kept on purpose: the display intent and the default
+ * annotation mode, so it draws what the page view showed; the print intent
+ * turns on layers a teacher edition hides on screen (§6.3). Cancel the returned
+ * task when the result is no longer wanted; its promise then rejects with a
+ * RenderingCancelledException.
  */
-export function renderRegion(
-  page: PDFPageProxy,
-  box: PdfBox,
-  scale: number,
-  canvas: HTMLCanvasElement,
-  recordImages = false,
-): RenderTask {
+export function renderRegion(page: PDFPageProxy, box: PdfBox, scale: number, canvas: HTMLCanvasElement): RenderTask {
   const shown = clipToPage(page, box);
   if (!shown) throw new Error("the box is off its page");
   const r = toViewRect(page.getViewport({ scale }), shown);
   canvas.width = Math.max(1, Math.round(r.w));
   canvas.height = Math.max(1, Math.round(r.h));
   const viewport = page.getViewport({ scale, offsetX: -r.x, offsetY: -r.y });
-  return page.render({ canvas, viewport, recordImages });
+  return page.render({ canvas, viewport });
 }
 
 /** A cancelled render is not a failure. */
@@ -337,111 +338,122 @@ export function isCancelled(err: unknown): boolean {
 
 // --- text-layer suggestions (§5.1) ----------------------------------------------
 
-/** A page's suggestions, as the page view shows them: its kind, and the questions proposed. */
-export interface PageSuggestions {
-  kind: PageKind;
-  proposals: Proposal[];
+/**
+ * A bank's text-layer suggestions (§5.1), worked out from the whole file by
+ * propose.ts, as the lab finder works them out: a page's suggestions depend on
+ * the pages before it and after it. Every page is read twice, in order: its
+ * text, for the lines the file repeats; then its text, its ink (the page drawn
+ * at INK_SCALE, on a canvas sized as the lab's is, with recordImages for where
+ * its images fall), its fonts' weights and, where needsOperators says so, its
+ * operator list. `canvas` makes a canvas of a size; `onPage` hears each page
+ * read. Each page is cleaned up after it (§4.5).
+ */
+export async function suggestFile(
+  doc: PDFDocumentProxy,
+  OPS: OpCodes,
+  canvas: (width: number, height: number) => HTMLCanvasElement,
+  onPage?: (done: number, pages: number) => void,
+): Promise<FileSuggestions> {
+  const pre: PreLine[][] = [];
+  for (let p = 1; p <= doc.numPages; p++) {
+    const page = await doc.getPage(p);
+    pre.push(preRead((await page.getTextContent()).items, page.getViewport({ scale: 1 })));
+  }
+  const file = startFile(pre);
+  for (let p = 1; p <= doc.numPages; p++) {
+    const page = await doc.getPage(p);
+    const viewport = page.getViewport({ scale: INK_SCALE });
+    const c = canvas(Math.ceil(viewport.width), Math.ceil(viewport.height));
+    try {
+      await page.render({ canvas: c, viewport, recordImages: true }).promise;
+      const ink = c.getContext("2d")!.getImageData(0, 0, c.width, c.height);
+      // Fonts are in commonObjs once the page is drawn.
+      const content = (await page.getTextContent()).items;
+      const bold = new Map<string, boolean>();
+      for (const it of content) {
+        if (!("fontName" in it) || bold.has(it.fontName)) continue;
+        let b = false;
+        try {
+          b = page.commonObjs.has(it.fontName) && isBoldFont(page.commonObjs.get(it.fontName));
+        } catch {
+          b = false;
+        }
+        bold.set(it.fontName, b);
+      }
+      const input: PageInput = {
+        page: p,
+        vp: page.getViewport({ scale: 1 }),
+        content,
+        bold,
+        ink,
+        images: page.imageCoordinates,
+      };
+      const ops = needsOperators(input) ? readOperators(await page.getOperatorList(), OPS) : null;
+      proposePage(file, input, ops);
+    } finally {
+      // Safari is slow to free a canvas's memory unless it is shrunk first.
+      c.width = c.height = 0;
+      // pdf.js waits for any render still running on the page, the one on screen included.
+      page.cleanup();
+    }
+    onPage?.(p, doc.numPages);
+  }
+  return finishFile(file);
 }
 
-// Per open bank: each page's suggestions once worked out, and how far the search
-// for its answers heading has got. Kept with the bank, and gone when it closes.
+// Per open bank: its suggestions, once worked out, and how far the work has got.
 interface BankSuggestions {
-  pages: Map<number, Promise<PageSuggestions>>;
-  /** The first digital page with an answers heading, once found. */
-  answersFrom: number | null;
-  /** Pages 1 to this one have none. */
-  checked: number;
-  /** The search runs one page after another, so pages asking at once share it. */
-  search: Promise<unknown>;
+  file: Promise<FileSuggestions>;
+  done: number;
+  pages: number;
+  listeners: Set<(done: number, pages: number) => void>;
 }
 const suggested = new WeakMap<PDFDocumentProxy, BankSuggestions>();
 
-// A page is drawn this small only to see where its images fall, which pdf.js
-// gives as fractions of the canvas.
-const COVERAGE_SCALE = 0.5;
-
-async function coverageOf(page: PDFPageProxy): Promise<number> {
-  if (!page.imageCoordinates) {
-    const canvas = document.createElement("canvas");
-    try {
-      await renderRegion(page, pageBox(page), COVERAGE_SCALE, canvas, true).promise;
-    } finally {
-      canvas.width = canvas.height = 0;
-      page.cleanup(); // §4.5: whoever draws a page frees what pdf.js decoded for it
-    }
-  }
-  return imageCoverage(page.imageCoordinates);
+function newCanvas(width: number, height: number): HTMLCanvasElement {
+  const c = document.createElement("canvas");
+  c.width = width;
+  c.height = height;
+  return c;
 }
 
 /**
- * Whether a digital page before `pageNo` has an answers heading, which ends the
- * bank's questions (§5.1 rule 6). Pages are read in order from the first, text
- * only, each once per open bank; only a page with a heading is drawn, small, to
- * tell a digital page from a scan's OCR layer.
+ * A bank's text-layer suggestions (§5.1), every page's: a continuation or a
+ * stem names questions on other pages. The bank is read for them once per open
+ * bank, in the background from the first ask, and they come at the end;
+ * `onProgress` hears how many pages are read until then. Suggestions are never
+ * saved; the page view shows them until one is accepted.
  */
-function answersBefore(doc: PDFDocumentProxy, bank: BankSuggestions, pageNo: number): Promise<boolean> {
-  const run = bank.search.then(async () => {
-    if (bank.answersFrom !== null) return bank.answersFrom < pageNo;
-    for (let k = bank.checked + 1; k < pageNo; k++) {
-      const page = await doc.getPage(k);
-      const text = readText((await page.getTextContent()).items, page.getViewport({ scale: 1 }));
-      if (text.answers && endsQuestions(pageKind(await coverageOf(page), text.chars), text)) {
-        bank.answersFrom = k;
-        return true;
-      }
-      bank.checked = k;
-    }
-    return false;
-  });
-  bank.search = run.catch(() => {});
-  return run;
-}
-
-async function suggest(doc: PDFDocumentProxy, bank: BankSuggestions, pageNo: number): Promise<PageSuggestions> {
-  const page = await doc.getPage(pageNo);
-  const vp = page.getViewport({ scale: 1 });
-  const text = readText((await page.getTextContent()).items, vp);
-  // Under 20 characters a page is a scan or has no text layer, and a page after
-  // the answers heading has no questions: either is drawn small, for its kind.
-  const candidate = text.chars >= 20 && !(await answersBefore(doc, bank, pageNo));
-  const canvas = document.createElement("canvas");
-  try {
-    await renderRegion(page, pageBox(page), candidate ? INK_SCALE : COVERAGE_SCALE, canvas, true).promise;
-    const kind = pageKind(imageCoverage(page.imageCoordinates), text.chars);
-    if (kind !== "digital" || !candidate) return { kind, proposals: [] };
-    const ink = canvas.getContext("2d")!.getImageData(0, 0, canvas.width, canvas.height);
-    return { kind, proposals: propose(text, vp, ink) };
-  } finally {
-    // Safari is slow to free a canvas's memory unless it is shrunk first.
-    canvas.width = canvas.height = 0;
-    // §4.5: whoever draws a page frees what pdf.js decoded for it. The page on
-    // screen is already drawn; pdf.js waits for any render still running on it.
-    page.cleanup();
-  }
-}
-
-/**
- * A page's text-layer suggestions (§5.1), worked out once per open bank: only a
- * digital page above the bank's answers heading has any. The page is drawn again
- * off screen, at INK_SCALE, for its ink. Suggestions are never saved; the page
- * view shows them until one is accepted.
- */
-export function suggestionsFor(doc: PDFDocumentProxy, pageNo: number): Promise<PageSuggestions> {
+export function suggestionsFor(
+  doc: PDFDocumentProxy,
+  onProgress?: (done: number, pages: number) => void,
+): Promise<FileSuggestions> {
   let bank = suggested.get(doc);
   if (!bank) {
-    bank = { pages: new Map(), answersFrom: null, checked: 0, search: Promise.resolve() };
-    suggested.set(doc, bank);
-  }
-  const pages = bank.pages;
-  let found = pages.get(pageNo);
-  if (!found) {
-    const p = suggest(doc, bank, pageNo);
-    // A failure is not kept, so the page is tried again the next time it opens.
-    p.catch(() => {
-      if (pages.get(pageNo) === p) pages.delete(pageNo);
+    const fresh: BankSuggestions = {
+      file: loadPdfJs().then((pdfjs) =>
+        suggestFile(doc, pdfjs.OPS, newCanvas, (done, pages) => {
+          fresh.done = done;
+          for (const f of fresh.listeners) f(done, pages);
+        }),
+      ),
+      done: 0,
+      pages: doc.numPages,
+      listeners: new Set(),
+    };
+    // A failure is not kept, so the bank is read again the next time a page asks.
+    fresh.file.catch(() => {
+      if (suggested.get(doc) === fresh) suggested.delete(doc);
     });
-    pages.set(pageNo, p);
-    found = p;
+    suggested.set(doc, fresh);
+    bank = fresh;
   }
-  return found;
+  const held = bank;
+  if (onProgress) {
+    held.listeners.add(onProgress);
+    onProgress(held.done, held.pages);
+  }
+  return held.file.finally(() => {
+    if (onProgress) held.listeners.delete(onProgress);
+  });
 }

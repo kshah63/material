@@ -74,7 +74,7 @@ const world = () =>
 // Two US Letter pages as displayed, unrotated: y grows downwards from the top.
 const H = 792;
 const geometry = { width: 612, view: (b) => ({ x: b.x0, y: H - b.y1, w: b.x1 - b.x0, h: b.y1 - b.y0 }) };
-const PAGES = new Map([1, 2, 3, 4].map((p) => [p, geometry]));
+const PAGES = new Map([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((p) => [p, geometry]));
 
 // A box by its top and bottom as displayed, the way toPdfBox makes them (to 0.01 pt).
 const box = (top, bottom, x0 = 40.12, x1 = 571.88) => ({ x0, y0: H - bottom, x1, y1: H - top });
@@ -369,10 +369,39 @@ ok("after a save, an unused stimulus is carried over and a drawn box is found ag
   assert.equal(order([["1", 40, 50, 250, 80], ["3", 320, 60, 240, 90], ["2", 40, 200, 250, 80], ["4", 320, 300, 240, 50]]), "1 2 3 4");
   // A grid: cells side by side on each row, each ending at the next cell, are read along the row.
   assert.equal(order([["1", 40, 50, 268, 30], ["2", 312, 51, 248, 30], ["3", 40, 100, 268, 30], ["4", 312, 102, 248, 30]]), "1 2 3 4");
-  // Two columns numbered down each column whose rows line up are still two
-  // columns (g6-math-fluency-1-merged p. 2, Q1-20 left and Q21-35 right).
-  assert.equal(order([["1", 40, 60, 250, 120], ["2", 40, 200, 250, 120], ["3", 40, 340, 250, 120],
-                      ["4", 320, 62, 250, 120], ["5", 320, 203, 250, 120], ["6", 320, 341, 250, 120]], 612), "1 2 3 4 5 6");
+  // Two columns numbered down each column whose rows line up, partly or exactly,
+  // are still two columns (g6-math-fluency-1-merged p. 2, Q1-20 left and Q21-35
+  // right; IGCSE CIM Book 1 p. 89's 22-25 and 26-29, 14 pt apart).
+  const fluency = [["1", 69, 93.4, 124.5, 19.6], ["2", 68.5, 121, 83.5, 19.5], ["3", 68, 148.9, 63.5, 19.6],
+    ["4", 68, 177, 82.5, 19.5], ["5", 68.5, 204.3, 135, 27.7], ["6", 68.5, 238.9, 75.5, 27.1],
+    ["21", 329.5, 94, 48, 21], ["22", 329.5, 122.2, 132.5, 55.3], ["23", 329.5, 184.9, 153.5, 27.6],
+    ["24", 329.5, 221.1, 69, 19.4], ["25", 329.5, 249.2, 116.5, 19.8], ["26", 329.5, 277, 157, 99]];
+  assert.equal(order(fluency, 612), "1 2 3 4 5 6 21 22 23 24 25 26");
+  const list = [["22", 82.5, 143.5, 22, 13.8], ["23", 82.5, 157.3, 22, 13.7], ["24", 82.5, 171, 22, 14], ["25", 82.5, 185, 22, 14.5],
+    ["26", 334.5, 140.9, 22, 16.4], ["27", 334.5, 157.3, 22, 13.7], ["28", 334.5, 171, 22, 14], ["29", 334.5, 185, 22, 14.5]];
+  assert.equal(order(list, 595.28), "22 23 24 25 26 27 28 29");
+  // Questions set two to a row, tops level and room to work under each, are
+  // read along the rows (IGCSE CIM Book 1 p. 31).
+  assert.equal(order([["1", 81.5, 173.1, 152, 115.4], ["2", 303, 173.1, 175, 104.9], ["3", 81, 296.1, 155.5, 106.9],
+                      ["4", 303, 296.1, 151.5, 104.9], ["5", 81, 414.7, 209, 109.8], ["6", 303, 414.7, 167.5, 111.3]], 595.28), "1 2 3 4 5 6");
+  // Three columns numbered down each (IGCSE CIM Book 1 p. 18).
+  assert.equal(order([["1", 87, 170, 79, 24.2], ["2", 86.5, 195, 87, 22.7], ["3", 86.5, 218.5, 89, 23.8],
+                      ["8", 249, 170.5, 102, 23.7], ["9", 248.5, 202.6, 110, 15.1], ["10", 249.5, 226.1, 61, 16.2],
+                      ["15", 411.5, 179, 67, 17.5], ["16", 412, 196.5, 20.5, 9.1], ["17", 412, 239.3, 92, 15.4]], 595.28),
+               "1 2 3 8 9 10 15 16 17");
+  // Bands: a stem across both columns above them, a wide question under them,
+  // then two more columns (IGCSE CIM Book 1 p. 89).
+  assert.equal(order([["s", 54.5, 113.3, 398.5, 30.6], ...list, ["30", 54.5, 209.9, 485.5, 141],
+                      ["33", 82.5, 379, 163.5, 144.5], ["36", 298, 399.9, 135.5, 119.1], ["37", 298, 523, 230, 163], ["35", 74, 524, 185, 127.5]], 595.28),
+               "s 22 23 24 25 26 27 28 29 30 33 35 36 37");
+  // A line run long across the gutter, beside the next column, stays in its own (p. 18's 41 beside 51, as v2.2 drew it).
+  assert.equal(order([["39", 249, 599.2, 63.5, 18.1], ["40", 248.5, 618.2, 93, 18], ["41", 248.5, 637.2, 184, 19.3],
+                      ["48", 411, 564.8, 94, 18], ["49", 411, 583.3, 87.5, 18.5], ["50", 411.5, 602.3, 74, 18.5], ["51", 411.5, 621.5, 97.5, 19.5]], 595.28),
+               "39 40 41 48 49 50 51");
+  // A row of cells, one across the gutter, over a column of questions: a grid row, then the column (unit2-s3 p. 5).
+  assert.equal(order([["1", 36, 374, 145.8, 25], ["2", 176, 374, 131.8, 25], ["3", 302, 374, 132, 25], ["4", 428.5, 374, 134, 25],
+                      ["5", 33, 413, 206, 22], ["6", 33, 435, 136, 27], ["7", 33, 463, 149, 20], ["8", 33, 484, 197, 20], ["9", 33, 505, 261, 20]], 612),
+               "1 2 3 4 5 6 7 8 9");
   // A gutter narrower than 1% of the page is still a gutter (question-bank-unit-1 p. 9).
   assert.equal(order([["1", 53, 74, 250, 212], ["2", 55, 290, 262, 386], ["3", 321, 74, 251, 234], ["4", 323, 314, 250, 305]], 611), "1 2 3 4");
   // A box across the gutter: one column, top to bottom.
@@ -396,7 +425,7 @@ ok("after a save, an unused stimulus is carried over and a drawn box is found ag
   );
   assert.deepEqual(call.edit.map((e) => [e.id, e.boxes[0].pos]).sort(), [["q-a", 1], ["q-b", 0]]);
 }
-ok("reading order: two columns, a grid row by row, aligned columns, a narrow gutter, a box across the gutter, one box a side, and a rotated page as displayed");
+ok("reading order: two columns, a grid row by row, lists down aligned columns, questions two to a row, three columns, bands under a stem and a wide question, a long line, a grid row over a column, a narrow gutter, a box across the gutter, one box a side, and a rotated page as displayed");
 
 // --- 16. a question's own box deleted under a shared stimulus ---------------------------------
 {
@@ -417,7 +446,176 @@ ok("reading order: two columns, a grid row by row, aligned columns, a narrow gut
 }
 ok("deleting a question's own box under a shared stimulus deletes the question, not leaves it as the stimulus alone");
 
-// --- 17. a teacher reads what the in_charge saved -----------------------------------------------
+// --- suggestions accepted (§4.3), as the page view accepts them ---------------------------------
+// The finder's suggestions for pages 5-8 (propose.ts Suggestion), each with its
+// box as displayed and in PDF space. Page 5 numbers two sections 1-2, so "the
+// question 2 on p. 5" a continuation names is the second section's, the one
+// left open at the foot, and the stem between the sections names the second's.
+const sug = (type, n, top, bottom, extra = {}) =>
+  ({ type, n, grid: false, view: { x: 40.12, y: top, w: 531.76, h: bottom - top }, box: box(top, bottom), ...extra });
+const CONT = ["continues the question above it"];
+const found = [
+  [], [], [], [],
+  [
+    sug("question", 1, 60, 140), sug("question", 2, 150, 300), sug("question", 1, 400, 500), sug("question", 2, 520, 760),
+    sug("stem", 1, 370, 395, { for: [{ page: 5, n: 1 }, { page: 5, n: 2 }] }),
+  ],
+  [
+    sug("continuation", 2, 40, 200, { for: [{ page: 5, n: 2 }], boxNo: 2, check: CONT }),
+    sug("question", 3, 300, 360),
+    sug("question", 4, 370, 430),
+    sug("stem", 3, 220, 290, { for: [{ page: 6, n: 3 }, { page: 6, n: 4 }, { page: 7, n: 5 }] }),
+  ],
+  [sug("question", 5, 50, 120), sug("continuation", 9, 200, 380, { for: [{ page: 4, n: 9 }], boxNo: 2, check: CONT })],
+  [sug("continuation", 2, 40, 200, { for: [{ page: 5, n: 2 }], boxNo: 3, check: CONT })],
+].map((proposals) => ({ proposals }));
+const offer = (page, i) => C.offersOn(found, page)[i];
+const how = { topic: null, stim: null, newId: (what) => (what === "question" ? qid() : rid()) };
+const accept = (offers) => {
+  const res = C.acceptOffers(screen, found, offers, how);
+  screen = res.crops;
+  return res;
+};
+const questionOf = (page, i) => C.questionAt(screen, page, offer(page, i).box);
+
+// --- 17. a continuation onto a saved question ------------------------------------------------------
+{
+  accept(C.offersOn(found, 5).filter((s) => s.type === "question"));
+  commit("p. 5's four questions");
+  const open = questionOf(5, 3);
+  assert.ok(open && open !== questionOf(5, 1), "two questions numbered 2 on p. 5, both saved");
+  const cont = offer(6, 0);
+  assert.deepEqual(C.namedOnScreen(screen, found, cont), [{ ref: { page: 5, n: 2 }, id: open }], "the last 2 on p. 5: the one open at its foot");
+  const res = accept([cont]);
+  assert.deepEqual([res.full, res.left, res.rects.length], [[], [], 1]);
+  sent = commit("continuation accepted");
+  assert.deepEqual(sent.edit, [{ id: open, boxes: [{ id: boxOf(open, 0).id }, { page: 6, ...box(40, 200), pos: 0 }] }]);
+  assert.deepEqual(bank.find((q) => q.id === open).boxes.map((b) => `${b.box_no}/p${b.page}`), ["1/p5", "2/p6"]);
+  assert.deepEqual(C.uncropped(screen, 6, [cont]), [], "and it is no longer offered");
+  // A continuation whose question is not cropped is not taken: the page view
+  // offers it as a question of its own instead, or to skip it.
+  const orphan = offer(7, 1);
+  assert.deepEqual(C.namedOnScreen(screen, found, orphan), [{ ref: { page: 4, n: 9 }, id: null }]);
+  const before = screen;
+  const left = accept([orphan]);
+  assert.deepEqual([left.left.map((s) => s.id), left.rects], [[orphan.id], []]);
+  assert.equal(screen, before, "nothing changes on screen");
+}
+ok("a continuation accepted onto the saved question it continues (the last of two numbered alike): an edit [{id}, its box on p. 6]; one whose question is not cropped is not taken");
+
+// --- 18. a stem onto several questions -------------------------------------------------------------
+{
+  // Questions 3 and 4 on p. 6 accepted and saved first, without the stem.
+  accept([offer(6, 1), offer(6, 2)]);
+  commit("questions 3 and 4");
+  const [q3, q4] = [questionOf(6, 1), questionOf(6, 2)];
+  const own = [boxOf(q3).id, boxOf(q4).id];
+  // The stem goes above both saved questions; question 5 on p. 7 goes under it once accepted.
+  const stem = offer(6, 3);
+  const res = accept([stem]);
+  assert.deepEqual(res.full, []);
+  assert.deepEqual(C.namedOnScreen(screen, found, stem).map((x) => x.id), [q3, q4, null]);
+  const q5offer = offer(7, 0);
+  assert.deepEqual(C.stimuliOver(screen, found, q5offer), [res.rects[0]], "question 5 is named by the accepted stem on p. 6");
+  accept([q5offer]);
+  sent = commit("stem above three questions");
+  const q5 = questionOf(7, 0);
+  assert.deepEqual(sent.edit.map((e) => e.id).sort(), [q3, q4].sort());
+  for (const e of sent.edit) {
+    assert.equal(e.boxes.length, 2);
+    assert.deepEqual(e.boxes[0], { page: 6, ...box(220, 290), pos: 1 }, "the stem, with no id, in front, second on its page");
+    assert.ok(own.includes(e.boxes[1].id));
+  }
+  assert.deepEqual(sent.add.find((a) => a.id === q5).boxes.map((b) => b.page), [6, 7]);
+  for (const q of [q3, q4, q5]) {
+    const b = boxOf(q, 0);
+    assert.deepEqual([b.box_no, b.page, b.y0, b.y1], [1, 6, H - 290, H - 220]);
+  }
+  assert.equal(new Set([q3, q4, q5].map((q) => boxOf(q, 0).id)).size, 3, "copied into each, not shared");
+  // On a page with two questions numbered 3, a stem names the one below it.
+  const two = [{ proposals: [sug("question", 3, 40, 100), sug("stem", 3, 120, 160, { for: [{ page: 1, n: 3 }] }), sug("question", 3, 170, 230)] }];
+  assert.equal(C.namedQuestion(two, C.offersOn(two, 1)[1], { page: 1, n: 3 }), two[0].proposals[2]);
+}
+ok("a stem accepted above two saved questions (edits, the stem in front with no id), and a question on the next page accepted under it (an add): box 1 of each, the same numbers, copied");
+
+// --- 19. four boxes at most, for suggestions too ----------------------------------------------------
+{
+  // The open question 2 of p. 5 runs on by hand to pp. 7 and 8: four boxes.
+  const open = questionOf(5, 3);
+  screen = C.addBox(screen, open, { id: rid(), page: 7, box: box(600, 700) });
+  screen = C.addBox(screen, open, { id: rid(), page: 8, box: box(600, 700) });
+  commit("four boxes by hand");
+  // Its continuation on p. 8 is refused on screen.
+  const shown = screen;
+  const res = accept([offer(8, 0)]);
+  assert.deepEqual([res.full, res.rects], [[open], []]);
+  assert.equal(screen, shown, "nothing changes");
+  assert.ok(C.isEmpty(C.diff(bank, screen, PAGES)));
+  // The stem between p. 5's sections goes above its question 1 only.
+  const q1b = questionOf(5, 2);
+  const stem = accept([offer(5, 4)]);
+  assert.deepEqual(stem.full, [open]);
+  sent = commit("stem with one question full");
+  // The full question keeps its four boxes: it is sent only for its new reading order on p. 5.
+  const resent = sent.edit.find((e) => e.id === open);
+  assert.deepEqual(resent.boxes.map((b) => Object.keys(b).sort().join()), ["id,pos", "id", "id", "id"]);
+  assert.deepEqual(bank.find((q) => q.id === open).boxes.map((b) => b.page), [5, 6, 7, 8]);
+  assert.deepEqual(bank.find((q) => q.id === q1b).boxes.map((b) => b.y1), [H - 370, H - 400]);
+  // save_crops refuses a fifth box sent anyway, and writes nothing.
+  const kept = bank.find((q) => q.id === open).boxes.map((b) => ({ id: b.id }));
+  const was = world();
+  assert.match(save({ add: [], edit: [{ id: open, boxes: [...kept, { page: 8, ...box(40, 200), pos: 9 }] }], remove: [] }), /^23514 /);
+  assert.equal(world(), was);
+}
+ok("four boxes at most: a continuation onto a full question is refused on screen, a stem goes above only the questions with room, and save_crops refuses a fifth box sent anyway");
+
+// --- 20. continuations accepted out of order print in the bank's order -----------------------------
+// Question 7 of p. 9 runs on to p. 10 (box 2) and p. 11 (box 3); question 8 of
+// p. 10 to p. 12's left column (box 2) and right column (box 3). Each box 3 is
+// accepted first (IM3 U4 booklet A's question 63, reached at p. 36 before p. 35).
+{
+  const half = (type, n, top, bottom, x0, x1, extra) =>
+    ({ ...sug(type, n, top, bottom, extra), view: { x: x0, y: top, w: x1 - x0, h: bottom - top }, box: box(top, bottom, x0, x1) });
+  const chain = [
+    [], [], [], [], [], [], [], [],
+    [sug("question", 7, 500, 760)],
+    [sug("continuation", 7, 40, 300, { for: [{ page: 9, n: 7 }], boxNo: 2, check: CONT }), sug("question", 8, 400, 760)],
+    [sug("continuation", 7, 40, 200, { for: [{ page: 9, n: 7 }], boxNo: 3, check: CONT })],
+    [
+      half("continuation", 8, 40, 700, 40.12, 300, { for: [{ page: 10, n: 8 }], boxNo: 2, check: CONT }),
+      half("continuation", 8, 40, 300, 312, 571.88, { for: [{ page: 10, n: 8 }], boxNo: 3, check: CONT }),
+    ],
+  ].map((proposals) => ({ proposals }));
+  const at = (page, i) => C.offersOn(chain, page)[i];
+  const take = (offers) => {
+    const res = C.acceptOffers(screen, chain, offers, how);
+    screen = res.crops;
+    return res;
+  };
+  const pagesOf = (q) => bank.find((x) => x.id === q).boxes.map((b) => `${b.box_no}/p${b.page}`);
+  take([at(9, 0), at(10, 1)]);
+  commit("questions 7 and 8");
+  const [q7, q8] = [C.questionAt(screen, 9, at(9, 0).box), C.questionAt(screen, 10, at(10, 1).box)];
+  // Box 3 first: it is box 2 for now, and the page view's button says so.
+  assert.deepEqual(C.continuesAt(screen, chain, at(11, 0)), { id: q7, at: 1 });
+  take([at(11, 0)]);
+  commit("question 7's box 3, accepted first");
+  assert.deepEqual(pagesOf(q7), ["1/p9", "2/p11"]);
+  // Box 2 then goes in front of it, on the saved question: an edit with the new box between the kept ones.
+  assert.deepEqual(C.continuesAt(screen, chain, at(10, 0)), { id: q7, at: 1 });
+  take([at(10, 0)]);
+  sent = commit("question 7's box 2");
+  assert.deepEqual(sent.edit.find((e) => e.id === q7).boxes.map((b) => b.id ?? `new p${b.page}`), [boxOf(q7, 0).id, "new p10", boxOf(q7, 2).id]);
+  assert.deepEqual(pagesOf(q7), ["1/p9", "2/p10", "3/p11"]);
+  // On one page, the right column's box 3 before the left column's box 2, both drafts.
+  take([at(12, 1)]);
+  take([at(12, 0)]);
+  commit("question 8's two columns");
+  assert.deepEqual(bank.find((x) => x.id === q8).boxes.map((b) => [b.page, b.x0]), [[10, 40.12], [12, 40.12], [12, 312]]);
+}
+ok("continuations accepted out of order, box 3 before box 2, on a saved question and in two columns of a page, print in the bank's order");
+
+// --- 21. a teacher reads what the in_charge saved -----------------------------------------------
 assert.equal(shape(C.fromBank(read(T))), shape(C.fromBank(bank)));
 ok("a teacher of the course reads the same bank");
 

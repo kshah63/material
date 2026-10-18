@@ -93,18 +93,20 @@ ok("a narrow box prints at 1.25 at most");
 }
 
 // The last box needs room for the source line too, so the line never sits alone.
+// The boxes are wider than 180 mm, so the question does not fit a page at the
+// bank's size either, and flows at its width's scale.
 {
-  const s = (180 * MM) / 500;
+  const s = (180 * MM) / 600;
   const first = (A.height - 30) / s; // leaves 30 pt under box 1
   const q = one([
-    { w: 500, h: first },
-    { w: 500, h: 20 / s }, // 20 pt: fits the 30 pt, but not with the 13.7 pt line
+    { w: 600, h: first },
+    { w: 600, h: 20 / s }, // 20 pt: fits the 30 pt, but not with the 13.7 pt line
   ]);
   assert.deepEqual(q.boxes.map((b) => b.page), [0, 1]);
   assert.equal(q.line.page, 1);
   const r = one([
-    { w: 500, h: first },
-    { w: 500, h: 15 / s }, // 15 pt plus the line fits the 30 pt
+    { w: 600, h: first },
+    { w: 600, h: 15 / s }, // 15 pt plus the line fits the 30 pt
   ]);
   assert.deepEqual(r.boxes.map((b) => b.page), [0, 0]);
   ok("a last box moves to the next page when its source line would not fit under it");
@@ -132,13 +134,31 @@ ok("a narrow box prints at 1.25 at most");
   near(sum.scale, 1.25, "a tall stacked question too");
   assert.deepEqual(sum.boxes.map((b) => b.page), [0, 0]);
   // A box from a digital bank that just fits, and the same box 20 pt taller,
-  // which no longer fits a page with its line: within 2% of each other.
+  // which no longer fits a page with its line at its width's scale but does at
+  // a smaller one, still over 1: within 2% of each other.
   const fits = L.scaleOf([{ w: 482, h: 640 }], A.height);
   const over = L.scaleOf([{ w: 482, h: 660 }], A.height);
-  assert.ok(fits.fits && !over.fits);
+  assert.ok(fits.fits && over.fits);
   near(fits.scale, (180 * MM) / 482, "the one that fits, at its width's scale");
+  near(over.scale, (A.height - 2 * MM - 8) / 660, "the taller one, at the largest scale that fits");
   assert.ok(over.scale / fits.scale > 0.98, `${over.scale} against ${fits.scale}`);
   ok("a question nearly a page tall prints at its width's scale, like one a little taller");
+}
+
+// The enlargement never splits what fits a page at the bank's own size: Chap10
+// warm-up 2's stem (the drawings I, II and III) and its question 4, 741 pt with
+// the line at the width's scale of 1.079 and 688 pt at 1, print on one page at
+// the largest scale that fits. One that does not fit at 1 flows at its width's scale.
+{
+  const q = one([{ w: 336, h: 482.5 }, { w: 473, h: 191.8 }]);
+  near(q.scale, (A.height - 2 * MM - 8) / (482.5 + 191.8), "the largest scale that fits");
+  assert.ok(q.scale > 1 && q.scale < (180 * MM) / 473);
+  assert.deepEqual(q.boxes.map((b) => b.page), [0, 0]);
+  assert.equal(q.line.page, 0);
+  const flows = one([{ w: 336, h: 520 }, { w: 473, h: 191.8 }]);
+  near(flows.scale, (180 * MM) / 473, "too tall at 1: its width's scale");
+  assert.deepEqual(flows.boxes.map((b) => b.page), [0, 1]);
+  ok("a stimulus and its question that fit a page at the bank's size are not split by the enlargement");
 }
 
 // A box taller than a page at its width's scale: never cut, and brought down only
@@ -158,8 +178,9 @@ ok("a narrow box prints at 1.25 at most");
 }
 
 // Every layout keeps every box and line inside the content area, never overlaps
-// two boxes, keeps a question's boxes in order, never shrinks a question that
-// does not fit, and never lets a question start before the one before it ends.
+// two boxes, keeps a question's boxes in order, shrinks a question to fit a page
+// only down to the bank's size and never one that flows, and never lets a
+// question start before the one before it ends.
 {
   let seed = 7;
   const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2 ** 31) / 2 ** 31);
@@ -177,10 +198,17 @@ ok("a narrow box prints at 1.25 at most");
       const { scale, fits } = L.scaleOf(qs[i], A.height);
       assert.equal(q.scale, scale);
       const width = Math.min(1.25, (180 * MM) / Math.max(...qs[i].map((b) => b.w)));
+      const room = A.height - 2 * MM - 8;
+      const stacked = qs[i].reduce((t, b) => t + b.h, 0);
       if (!fits) {
         const tallest = Math.max(...qs[i].map((b) => b.h));
-        near(q.scale, Math.min(width, (A.height - 2 * MM - 8) / tallest), "a question that flows keeps its scale");
-      } else near(q.scale, width, "a question that fits keeps its width's scale");
+        assert.ok(stacked > room, "only a question taller than a page at 1 flows");
+        near(q.scale, Math.min(width, room / tallest), "a question that flows keeps its scale");
+      } else if (stacked * width <= room + 0.01) near(q.scale, width, "a question that fits keeps its width's scale");
+      else {
+        near(q.scale, room / stacked, "one that fits only below its width's scale, at the largest that fits");
+        assert.ok(q.scale >= 1, "and never below the bank's size");
+      }
       assert.ok(q.boxes[0].page >= last, "starts after the one before");
       q.boxes.forEach((b, k) => {
         assert.ok(b.x >= A.x - 0.01 && b.x + b.w <= A.x + A.width + 0.01, "inside across");
@@ -201,7 +229,7 @@ ok("a narrow box prints at 1.25 at most");
     });
     assert.equal(out.pages, last + 1);
   }
-  ok("400 random worksheets: everything inside the content area, in order, never overlapping, never shrunk to flow");
+  ok("400 random worksheets: everything inside the content area, in order, never overlapping, shrunk to fit a page only down to the bank's size");
 }
 
 // The source line: the file name without .pdf, and its pages.

@@ -12,10 +12,11 @@ import type { ViewRect } from "@/lib/worksheet/source";
 // Crop mode, with a mouse, a pen or one finger: drag on empty page to draw,
 // drag a box to move it, drag the selected box's edge or corner to resize it,
 // tap to select, tap empty page to deselect. A suggestion (§5.1) is empty page
-// that a tap accepts: a drag across it still draws. Two fingers scroll the
-// page, because one finger draws. Every box is also a button, so Tab reaches it
-// and Enter selects it, or accepts a suggestion; in pick mode a tap or Enter on
-// a box picks its question.
+// that a tap accepts: a drag across it still draws. One marked with the amber
+// "?" says why on hover, and a tap on it asks first (the page view's toolbar).
+// Two fingers scroll the page, because one finger draws. Every box is also a
+// button, so Tab reaches it and Enter selects it, or accepts a suggestion; in
+// pick mode a tap or Enter on a box picks its question.
 
 export interface StageItem {
   id: string;
@@ -36,6 +37,10 @@ export interface StageItem {
   pickable: boolean;
   /** A text-layer suggestion, not a box yet: drawn dashed, and a tap accepts it. */
   suggestion?: true;
+  /** A suggestion's "?": why it needs a look before it is accepted. */
+  check?: string[];
+  /** The suggestion the toolbar is asking about. */
+  asked?: boolean;
   title: string;
 }
 
@@ -319,9 +324,13 @@ export function Stage({
                 width={it.v.w}
                 height={it.v.h}
                 vectorEffect="non-scaling-stroke"
-                strokeWidth={1.75}
+                strokeWidth={it.asked ? 3 : 1.75}
                 strokeDasharray="6 4"
-                style={{ stroke: "var(--ink-soft)", fill: "rgba(133,119,100,0.06)" }}
+                style={
+                  it.asked
+                    ? { stroke: "var(--honey-deep)", fill: "rgba(217,147,39,0.12)" }
+                    : { stroke: "var(--ink-soft)", fill: "rgba(133,119,100,0.06)" }
+                }
               />
             );
           }
@@ -384,7 +393,7 @@ export function Stage({
       </svg>
 
       {shown.map((it) =>
-        it.label || it.picked ? (
+        !it.suggestion && (it.label || it.picked) ? (
           <span
             key={it.id}
             className="absolute mono inline-flex items-center gap-1"
@@ -408,6 +417,42 @@ export function Stage({
           >
             {it.picked && <CheckIcon width={11} height={11} style={{ flex: "none" }} />}
             {it.label ?? "picked"}
+          </span>
+        ) : null,
+      )}
+
+      {/* A suggestion's tag: the amber "?", whose reasons show on hover (a tap on
+          it is a tap on the suggestion, which asks first), and what it is for. */}
+      {shown.map((it) =>
+        it.suggestion && (it.label || it.check) ? (
+          <span
+            key={it.id}
+            className="absolute mono inline-flex"
+            title={it.check ? `Check it: ${it.check.join("; ")}` : undefined}
+            style={{
+              right: `${100 - ((it.v.x + it.v.w) / width) * 100}%`,
+              top: `${(it.v.y / height) * 100}%`,
+              maxWidth: `${(it.v.w / width) * 100}%`,
+              fontSize: 10.5,
+              lineHeight: 1.2,
+              color: "#fff",
+              borderBottomLeftRadius: 6,
+              overflow: "hidden",
+              opacity: 0.95,
+              whiteSpace: "nowrap",
+              pointerEvents: it.check ? "auto" : "none",
+            }}
+          >
+            {it.check && (
+              <span style={{ flex: "none", padding: "2px 6px", fontWeight: 700, background: "var(--honey-deep)" }}>?</span>
+            )}
+            {it.label && (
+              <span
+                style={{ padding: "2px 6px", background: "var(--ink-soft)", overflow: "hidden", textOverflow: "ellipsis" }}
+              >
+                {it.label}
+              </span>
+            )}
           </span>
         ) : null,
       )}

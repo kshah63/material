@@ -39,13 +39,15 @@ import {
   suggestionsFor,
   toPdfBox,
   toViewRect,
-  type PageSuggestions,
   type ViewRect,
 } from "@/lib/worksheet/source";
-import type { PageKind } from "@/lib/worksheet/propose";
+import type { FileSuggestions, PageKind, QuestionRef } from "@/lib/worksheet/propose";
+import { pagesText } from "@/lib/worksheet/layout";
 import {
   MAX_BOXES,
+  acceptOffers,
   addBox,
+  continuesAt,
   addQuestion,
   canAddBox,
   canPutAbove,
@@ -58,6 +60,8 @@ import {
   isStimulus,
   makeStimulus,
   moveRect,
+  namedOnScreen,
+  offersOn,
   putAbove,
   rebase,
   removeRect,
@@ -65,7 +69,9 @@ import {
   uncropped,
   unsaved,
   usersOf,
+  type CropQuestion,
   type Crops,
+  type Offer,
   type PageGeometry,
 } from "@/lib/worksheet/crops";
 import type { BankQuestion } from "@/lib/queries";
@@ -112,11 +118,42 @@ const geometryOf = (viewports: Map<number, PageViewport>) =>
 
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
 
+/** Question numbers as runs: "5–7, 9". */
+function numbers(refs: readonly QuestionRef[]): string {
+  const ns = Array.from(new Set(refs.map((r) => r.n))).sort((a, b) => a - b);
+  const runs: string[] = [];
+  for (let i = 0; i < ns.length; ) {
+    let j = i;
+    while (j + 1 < ns.length && ns[j + 1] === ns[j] + 1) j++;
+    runs.push(j > i ? `${ns[i]}–${ns[j]}` : `${ns[i]}`);
+    i = j + 1;
+  }
+  return runs.join(", ");
+}
+
+// A suggestion's tag on the page: what a box that is not a question is for. A
+// question's own number is printed in its box.
+function tagOf(s: Offer): string | null {
+  if (s.type === "continuation") return `continues Q${s.n}`;
+  if (s.type === "question") return null;
+  return s.for?.length ? `above Q${numbers(s.for)}` : "stimulus";
+}
+
+// A suggestion in words, for its keyboard target and the toolbar.
+function nameOf(s: Offer): string {
+  if (s.type === "question") return `Suggested question ${s.n}`;
+  if (s.type === "continuation") return `Suggested box ${s.boxNo ?? 2} of question ${s.n}`;
+  const what = s.type === "context" ? `${s.label ?? "context"}, a stimulus` : "Suggested stimulus";
+  return s.for?.length ? `${what} above questions ${numbers(s.for)}` : what;
+}
+
 // The kind of page (§5.1), as the in-charge's toolbar names it.
 const KIND: Record<PageKind, string> = {
   digital: "Digital page",
   scanned: "Scanned page",
   none: "No text layer",
+  blank: "Blank page",
+  "render-failed": "Page did not draw",
 };
 
 /**
@@ -139,6 +176,8 @@ export function PageView(props: PageViewProps) {
   const [sel, setSel] = useState<string | null>(null); // the selected rectangle
   const [stim, setStim] = useState<string | null>(null); // the stimulus new questions go under
   const [adding, setAdding] = useState<string | null>(null); // the question Add a box adds to
+  const [asking, setAsking] = useState<string | null>(null); // the suggestion the toolbar asks about
+  const [notice, setNotice] = useState<string | null>(null); // what an accept did, until the next edit
   const [newTopic, setNewTopic] = useState(""); // "" is No topic
   const [saving, setSaving] = useState(false);
   const [failure, setFailure] = useState<SaveFailure | null>(null);
@@ -157,6 +196,8 @@ export function PageView(props: PageViewProps) {
       setSel(null);
       setStim(null);
       setAdding(null);
+      setAsking(null);
+      setNotice(null);
       setFailure(null);
     }
   }
@@ -275,6 +316,26 @@ export function PageView(props: PageViewProps) {
     };
   }, []);
 
+  // The toolbar and the answers notice sit above the page, outside its scroll.
+  // When they change height (the bank's suggestions arriving, a suggestion
+  // accepted), the page is scrolled by as much, so it stays where it was under
+  // the pointer, and a drag begun meanwhile ends where it was aimed.
+  const aboveRef = useRef<HTMLDivElement>(null);
+  const aboveShown = cropping && !!doc;
+  useEffect(() => {
+    const el = aboveRef.current;
+    const scroller = scrollRef.current;
+    if (!aboveShown || !el || !scroller) return;
+    let h = el.getBoundingClientRect().height;
+    const ro = new ResizeObserver(() => {
+      const next = el.getBoundingClientRect().height;
+      scroller.scrollTop += next - h;
+      h = next;
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [aboveShown]);
+
   // The overlay follows the page last drawn, not the one asked for, so boxes
   // never sit over the previous page while the next one renders.
   const [shown, setShown] = useState<{ page: number; viewport: PageViewport } | null>(null);
@@ -336,41 +397,59 @@ export function PageView(props: PageViewProps) {
   }, [doc, page]);
 
   // --- suggestions (§5.1) --------------------------------------------------------
-  // In crop mode each page, once drawn, gets its text-layer suggestions. They
-  // are never saved: accepting one makes it a drawn box, saved like any other.
-  // A scanned page has none, and is drawn by hand (§5.3).
+  // In crop mode, once a page is drawn, the bank is read for its text-layer
+  // suggestions, which come for every page at once. They are never saved:
+  // accepting one makes it a draft, saved like any other box. A question becomes
+  // a new question; a continuation the next box of the question it continues; a
+  // stem or context a stimulus above the questions it names (§4.3). A scanned
+  // page has none, and is drawn by hand (§5.3).
   const shownPage = shown?.page ?? null;
   const [suggested, setSuggested] = useState<
-    { page: number; found: PageSuggestions } | { page: number; error: string } | null
+    { doc: PDFDocumentProxy; found: FileSuggestions } | { doc: PDFDocumentProxy; error: string } | null
   >(null);
+  const [reading, setReading] = useState<{ done: number; pages: number } | null>(null);
   useEffect(() => {
     if (!cropping || !doc || shownPage === null) return;
     let cancelled = false;
-    suggestionsFor(doc, shownPage).then(
+    // Asked again on every page: the bank is read once, and a failed read is tried again.
+    suggestionsFor(doc, (done, pages) => {
+      if (!cancelled) setReading({ done, pages });
+    }).then(
       (found) => {
-        if (!cancelled) setSuggested({ page: shownPage, found });
+        if (!cancelled) setSuggested({ doc, found });
       },
       (err: unknown) => {
-        if (!cancelled) setSuggested({ page: shownPage, error: (err as Error)?.message ?? String(err) });
+        if (!cancelled) setSuggested({ doc, error: (err as Error)?.message ?? String(err) });
       },
     );
     return () => {
       cancelled = true;
     };
   }, [cropping, doc, shownPage]);
-  const here = suggested !== null && suggested.page === shownPage ? suggested : null;
-  const found = here && "found" in here ? here.found : null;
+  const forDoc = suggested !== null && suggested.doc === doc ? suggested : null;
+  const bankFound = forDoc && "found" in forDoc ? forDoc.found : null;
+  const found = bankFound && shownPage !== null ? (bankFound.pages[shownPage - 1] ?? null) : null;
+  // Suggestions skipped on this screen (a continuation whose question is not
+  // cropped, or a "?" one): hidden until the bank is opened again.
+  const [skipped, setSkipped] = useState<ReadonlySet<string>>(() => new Set());
   // Hidden where a box already is, saved or drawn here: an accepted one included.
   const offered = useMemo(
     () =>
-      found && here
-        ? uncropped(
-            crops,
-            here.page,
-            found.proposals.map((s, i) => ({ ...s, id: `s:${here.page}:${i}` })),
-          )
+      bankFound && shownPage !== null
+        ? uncropped(crops, shownPage, offersOn(bankFound.pages, shownPage)).filter((s) => !skipped.has(s.id))
         : [],
-    [found, here, crops],
+    [bankFound, shownPage, crops, skipped],
+  );
+  // Accept all (n) takes every suggestion without a "?": a continuation always
+  // has one (R51), so each is looked at on its own (§4.3).
+  const sure = useMemo(() => offered.filter((s) => !s.check && s.type !== "continuation"), [offered]);
+  const flagged = offered.length - sure.length;
+  const asked = asking !== null ? (offered.find((s) => s.id === asking) ?? null) : null;
+  // The pages after an answers heading or in an answer list (§5.1): a file with
+  // answers in it is cropped from a clean copy (§2.1 item 16).
+  const answerPages = useMemo(
+    () => (bankFound ? bankFound.pages.flatMap((p, i) => (p.answers ? [i + 1] : [])) : []),
+    [bankFound],
   );
 
   /**
@@ -463,6 +542,8 @@ export function PageView(props: PageViewProps) {
     setPageNo(p);
     // A selected stimulus stays in hand on the next page; anything else is let go.
     setSel(select ?? (sel !== null && sel === stim ? sel : null));
+    setAsking(null);
+    setNotice(null);
     keepInUrl(p, topic);
   };
   const onTopic = (t: string) => {
@@ -532,6 +613,8 @@ export function PageView(props: PageViewProps) {
 
   function select(id: string | null) {
     setSel(id);
+    setAsking(null);
+    setNotice(null);
     if (id === null) {
       // Esc, or a tap on empty page: nothing selected, nothing in hand.
       setStim(null);
@@ -546,6 +629,8 @@ export function PageView(props: PageViewProps) {
 
   function draw(v: ViewRect) {
     if (!editable || !shown) return;
+    setAsking(null);
+    setNotice(null);
     const rect = {
       id: `n:${crypto.randomUUID()}`,
       page: shown.page,
@@ -564,26 +649,70 @@ export function PageView(props: PageViewProps) {
     );
   }
 
-  /** A suggestion accepted: the same as drawing its box by hand. */
+  /**
+   * A suggestion tapped (§4.3). While a box is being added to a question, its box
+   * is that box, as if drawn. One with a "?" asks first, in the toolbar, with its
+   * reasons; so does every continuation, which needs its question on screen.
+   * Anything else is accepted at once.
+   */
   function accept(id: string) {
     const s = offered.find((x) => x.id === id);
-    if (s) draw(s.view);
+    if (!s || !editable) return;
+    if (adding !== null) return draw(s.view);
+    if (s.check || s.type === "continuation") {
+      setSel(null);
+      setNotice(null);
+      setAsking(s.id);
+      return;
+    }
+    take([s]);
   }
 
-  /** Accept all (n): every suggestion on the page, each a new question, under the stimulus in hand if any. */
+  /**
+   * Suggestions made drafts (crops.ts acceptOffers). One question or box taken
+   * alone is selected, as a drawn one is; what else happened is said in the
+   * toolbar: a stimulus's questions, and any left as they were for four boxes.
+   */
+  function take(offers: Offer[]) {
+    if (!editable || !bankFound) return;
+    const res = acceptOffers(crops, bankFound.pages, offers, {
+      topic: newTopic || null,
+      stim,
+      newId: (what) => (what === "question" ? crypto.randomUUID() : `n:${crypto.randomUUID()}`),
+    });
+    setAsking(null);
+    setAdding(null);
+    const one = offers.length === 1 ? offers[0] : null;
+    const stimulus = one !== null && (one.type === "stem" || one.type === "context");
+    apply(res.crops, one && !stimulus && res.rects.length === 1 ? res.rects[0] : null);
+    const said: string[] = [];
+    if (stimulus) {
+      const named = namedOnScreen(res.crops, bankFound.pages, one);
+      const above = named.filter((x) => x.id !== null && !res.full.includes(x.id)).length;
+      const later = named.filter((x) => x.id === null).length;
+      said.push(`The stimulus is above ${plural(above, "question")}.`);
+      if (later) said.push(`${later} more ${later === 1 ? "goes" : "go"} under it when accepted.`);
+    }
+    if (res.full.length === 1) said.push("A question already has four boxes, so it was left as it was.");
+    if (res.full.length > 1) said.push(`${res.full.length} questions already have four boxes, so they were left as they were.`);
+    if (res.left.length) said.push("Not accepted: the question it continues isn't cropped yet.");
+    setNotice(said.length ? said.join(" ") : null);
+  }
+
+  /** Accept all (n): every suggestion on the page without a "?". */
   function acceptAll() {
     if (!editable || !shown) return;
-    let next = crops;
-    for (const s of offered) {
-      next = addQuestion(
-        next,
-        { id: crypto.randomUUID(), topic_id: newTopic || null },
-        { id: `n:${crypto.randomUUID()}`, page: shown.page, box: toPdfBox(shown.viewport, s.view) },
-        stim,
-      );
-    }
-    setAdding(null);
-    apply(next, null);
+    take(sure);
+  }
+
+  /** The suggestion asked about, made a question of its own: a continuation whose question is not on screen or is full. */
+  function takeAsQuestion(s: Offer) {
+    take([{ ...s, type: "question", for: undefined, boxNo: undefined }]);
+  }
+
+  function skip(s: Offer) {
+    setSkipped((prev) => new Set(prev).add(s.id));
+    setAsking(null);
   }
 
   function change(id: string, v: ViewRect) {
@@ -612,7 +741,7 @@ export function PageView(props: PageViewProps) {
     const t = e.target;
     if (t instanceof HTMLElement && (t.closest("input, select, textarea") || t.isContentEditable)) return;
     if (e.key === "Escape") {
-      if (sel !== null || stim !== null || adding !== null) select(null);
+      if (sel !== null || stim !== null || adding !== null || asking !== null) select(null);
       return;
     }
     if (!editable || !shown || !selRect || selRect.page !== shown.page) return;
@@ -697,15 +826,17 @@ export function PageView(props: PageViewProps) {
         active: false,
         picked: false,
         dim: false,
-        label: null,
+        label: tagOf(s),
         warn: false,
         pickable: false,
         suggestion: true as const,
-        title: `Suggested question ${s.n}: accept it`,
+        check: s.check,
+        asked: s.id === asking,
+        title: `${nameOf(s)}: accept it${s.check ? ` (check it: ${s.check.join("; ")})` : ""}`,
       })),
       ...items,
     ],
-    [offered, items],
+    [offered, items, asking],
   );
 
   const vw = shown?.viewport.width ?? 595;
@@ -717,7 +848,7 @@ export function PageView(props: PageViewProps) {
   };
 
   // --- the toolbar's question ---------------------------------------------------
-  const firstHere = current ? current.rects.findIndex((id) => crops.rects[id].page === page) : -1;
+  const here = current ? current.rects.flatMap((id, i) => (crops.rects[id].page === page ? [i] : [])) : [];
   const elsewhere = current
     ? Array.from(
         new Map(
@@ -725,11 +856,12 @@ export function PageView(props: PageViewProps) {
             .map((id, i) => ({ id, i, p: crops.rects[id].page }))
             .filter((x) => x.p !== page)
             .map((x) => [
-              firstHere < 0
-                ? `box ${x.i + 1} on p. ${x.p}`
-                : x.i < firstHere
-                  ? `starts on p. ${x.p}`
-                  : `continues on p. ${x.p}`,
+              // Where it starts, where it goes on to after this page, and any other box by its number.
+              here.length && x.i === 0
+                ? `starts on p. ${x.p}`
+                : here.length && x.i === here[here.length - 1] + 1
+                  ? `continues on p. ${x.p}`
+                  : `box ${x.i + 1} on p. ${x.p}`,
               x,
             ]),
         ),
@@ -838,221 +970,262 @@ export function PageView(props: PageViewProps) {
       </header>
 
       {cropping && doc && (
-        <div
-          className="flex items-center gap-2 flex-wrap"
-          style={{
-            padding: "8px 16px",
-            minHeight: 48,
-            background: "var(--surface)",
-            borderBottom: "1px solid var(--line)",
-            fontSize: 13.5,
-          }}
-        >
-          {selTwice && selRect ? (
-            <>
-              <span style={{ fontWeight: 800 }}>
-                Cropped twice
-                {selRect.page !== page && ` on p. ${selRect.page}`}
-              </span>
-              <span style={{ color: "var(--ink-soft)" }}>
-                This box is saved as {plural(users.get(selRect.id)?.length ?? 0, "question")}.
-              </span>
-              <button
-                className="btn btn-ghost btn-sm"
-                disabled={!editable}
-                onClick={() => apply(deleteQuestion(crops, dupeUnderSel[dupeUnderSel.length - 1]))}
-              >
-                <TrashIcon width={15} height={15} /> Delete one
-              </button>
-            </>
-          ) : selIsStim && selRect ? (
-            <>
-              <span style={{ fontWeight: 800 }}>
-                Stimulus
-                {selRect.page !== page && ` on p. ${selRect.page}`}
-                {" · "}
-                {users.get(selRect.id)?.length
-                  ? `above ${plural(users.get(selRect.id)!.length, "question")}`
-                  : "above no question yet"}
-              </span>
-              <span style={{ color: "var(--ink-soft)" }}>Questions you draw now go under it.</span>
-              {dupeUnderSel.length > 0 && (
+        <div ref={aboveRef}>
+          <div
+            className="flex items-center gap-2 flex-wrap"
+            style={{
+              padding: "8px 16px",
+              minHeight: 48,
+              background: "var(--surface)",
+              borderBottom: "1px solid var(--line)",
+              fontSize: 13.5,
+            }}
+          >
+            {selTwice && selRect ? (
+              <>
+                <span style={{ fontWeight: 800 }}>
+                  Cropped twice
+                  {selRect.page !== page && ` on p. ${selRect.page}`}
+                </span>
+                <span style={{ color: "var(--ink-soft)" }}>
+                  This box is saved as {plural(users.get(selRect.id)?.length ?? 0, "question")}.
+                </span>
                 <button
                   className="btn btn-ghost btn-sm"
                   disabled={!editable}
                   onClick={() => apply(deleteQuestion(crops, dupeUnderSel[dupeUnderSel.length - 1]))}
                 >
-                  Delete one
+                  <TrashIcon width={15} height={15} /> Delete one
                 </button>
-              )}
-              <button className="btn btn-danger btn-sm" disabled={!editable} onClick={removeSelected}>
-                <TrashIcon width={15} height={15} /> Delete stimulus
-              </button>
-            </>
-          ) : current ? (
-            <>
-              <span style={{ fontWeight: 800 }}>
-                {savedIds.has(current.id) ? "Question" : "New question"}
-                {current.rects.length > 1 && ` · ${current.rects.length} boxes`}
+              </>
+            ) : selIsStim && selRect ? (
+              <>
+                <span style={{ fontWeight: 800 }}>
+                  Stimulus
+                  {selRect.page !== page && ` on p. ${selRect.page}`}
+                  {" · "}
+                  {users.get(selRect.id)?.length
+                    ? `above ${plural(users.get(selRect.id)!.length, "question")}`
+                    : "above no question yet"}
+                </span>
+                <span style={{ color: "var(--ink-soft)" }}>Questions you draw now go under it.</span>
+                {dupeUnderSel.length > 0 && (
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    disabled={!editable}
+                    onClick={() => apply(deleteQuestion(crops, dupeUnderSel[dupeUnderSel.length - 1]))}
+                  >
+                    Delete one
+                  </button>
+                )}
+                <button className="btn btn-danger btn-sm" disabled={!editable} onClick={removeSelected}>
+                  <TrashIcon width={15} height={15} /> Delete stimulus
+                </button>
+              </>
+            ) : current ? (
+              <>
+                <span style={{ fontWeight: 800 }}>
+                  {savedIds.has(current.id) ? "Question" : "New question"}
+                  {current.rects.length > 1 && ` · ${current.rects.length} boxes`}
+                </span>
+                {elsewhere.map(([text, x]) => (
+                  <button key={text} className="btn btn-quiet btn-sm" onClick={() => goTo(x.p, x.id)}>
+                    {text}
+                  </button>
+                ))}
+                {topics.length > 0 && (
+                  <select
+                    className="field"
+                    style={{ width: "auto", padding: "5px 10px", fontSize: 13.5 }}
+                    value={current.topic_id ?? ""}
+                    disabled={!editable}
+                    onChange={(e) => apply(setTopic(crops, current.id, e.target.value || null))}
+                    aria-label="Question's topic"
+                  >
+                    <option value="">No topic</option>
+                    {topics.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                <button
+                  className="btn btn-ghost btn-sm"
+                  disabled={!editable || !canAddBox(current) || adding === current.id}
+                  onClick={() => setAdding(current.id)}
+                >
+                  <PlusIcon width={15} height={15} /> Add a box
+                </button>
+                {stim !== null && !current.rects.includes(stim) && (
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    disabled={!editable || !canPutAbove(current, stim)}
+                    onClick={() => apply(putAbove(crops, current.id, stim))}
+                  >
+                    Put the stimulus above
+                  </button>
+                )}
+                {/* Only on a draft (§4.3): on a saved question it would delete the question. */}
+                {selRect && selQuestion && !savedIds.has(selQuestion.id) && selQuestion.rects.length === 1 && (
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    disabled={!editable}
+                    title="Print this box once above several questions"
+                    onClick={() => {
+                      apply(makeStimulus(crops, selRect.id));
+                      setStim(selRect.id);
+                    }}
+                  >
+                    Stimulus
+                  </button>
+                )}
+                {/* A draft has no row to pick yet: a pick of it could never resolve. */}
+                {savedIds.has(current.id) && (
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    aria-pressed={picks.includes(current.id)}
+                    onClick={() => togglePick(current.id)}
+                  >
+                    {picks.includes(current.id) ? (
+                      <>
+                        <CheckIcon width={15} height={15} /> Picked
+                      </>
+                    ) : (
+                      "Pick"
+                    )}
+                  </button>
+                )}
+                {selRect && selQuestion && current.rects.length > 1 && selRect.page === page && (
+                  <button className="btn btn-ghost btn-sm" disabled={!editable} onClick={removeSelected}>
+                    Remove box
+                  </button>
+                )}
+                <button
+                  className="btn btn-danger btn-sm"
+                  disabled={!editable}
+                  onClick={() => apply(deleteQuestion(crops, current.id), null)}
+                >
+                  <TrashIcon width={15} height={15} /> Delete question
+                </button>
+                {adding === current.id ? (
+                  <span style={{ color: "var(--berry-deep)", fontWeight: 700 }}>
+                    Drag on this page or another to add box {current.rects.length + 1}. Esc cancels.
+                  </span>
+                ) : (
+                  current.rects.length >= MAX_BOXES && (
+                    <span style={{ color: "var(--ink-soft)" }}>
+                      Four boxes at most: crop the rest as another question.
+                    </span>
+                  )
+                )}
+              </>
+            ) : asked ? (
+              <AskedSuggestion
+                s={asked}
+                on={asked.type === "continuation" && bankFound ? namedOnScreen(crops, bankFound.pages, asked)[0] : null}
+                at={asked.type === "continuation" && bankFound ? (continuesAt(crops, bankFound.pages, asked)?.at ?? null) : null}
+                question={(id) => byId.get(id)}
+                disabled={!editable}
+                onAccept={() => take([asked])}
+                onAsQuestion={() => takeAsQuestion(asked)}
+                onSkip={() => skip(asked)}
+              />
+            ) : (
+              <span style={{ color: "var(--ink-soft)" }}>
+                {notice !== null && !saving && (
+                  <span style={{ color: "var(--ink)", fontWeight: 700 }}>{notice} </span>
+                )}
+                {saving
+                  ? "Saving…"
+                  : failure?.kind === "reload"
+                    ? "Reload the page to go on cropping."
+                    : !forDoc
+                      ? reading && reading.pages > 1
+                        ? `Finding suggestions: page ${Math.min(reading.done + 1, reading.pages)} of ${reading.pages}…`
+                        : "Finding suggestions…"
+                      : !found
+                        ? "Suggestions failed on this bank. Drag to draw a box."
+                        : offered.length
+                          ? `Click a dashed box to accept it, or drag to draw a box.${
+                              !flagged
+                                ? ""
+                                : flagged === 1
+                                  ? ` The one marked ? needs a look${sure.length ? ", so Accept all leaves it" : ""}.`
+                                  : ` The ${flagged} marked ? need a look${sure.length ? ", so Accept all leaves them" : ""}.`
+                            }`
+                          : bankFound?.answerKey
+                            ? "Nothing is suggested on an answer key. Drag to draw a box."
+                            : found.kind === "blank"
+                              ? "This page is blank: there is nothing on it to crop."
+                              : found.kind === "render-failed"
+                                ? "The PDF reader could not draw this page, so nothing is suggested on it. Drag to draw a box."
+                                : found.answers && found.proposals.length === 0
+                                  ? "This page is answers: nothing is suggested on it. Drag to draw a box."
+                                  : "No suggestions on this page. Drag to draw a box."}
+                {items.length > 0 && !saving && failure?.kind !== "reload" && " Click a box to change it."}
+                <span className="hidden pointer-coarse:inline"> Two fingers scroll.</span>
               </span>
-              {elsewhere.map(([text, x]) => (
-                <button key={text} className="btn btn-quiet btn-sm" onClick={() => goTo(x.p, x.id)}>
-                  {text}
+            )}
+            {stimRect && (!selIsStim || selTwice) && (
+              <span className="flex items-center gap-1.5" style={{ color: "var(--berry-deep)", fontWeight: 700 }}>
+                New questions go under the stimulus on p. {stimRect.page}.
+                <button className="btn btn-quiet btn-sm" onClick={() => setStim(null)}>
+                  Done
                 </button>
-              ))}
-              {topics.length > 0 && (
-                <select
-                  className="field"
-                  style={{ width: "auto", padding: "5px 10px", fontSize: 13.5 }}
-                  value={current.topic_id ?? ""}
-                  disabled={!editable}
-                  onChange={(e) => apply(setTopic(crops, current.id, e.target.value || null))}
-                  aria-label="Question's topic"
-                >
-                  <option value="">No topic</option>
-                  {topics.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.name}
-                    </option>
-                  ))}
-                </select>
-              )}
-              <button
-                className="btn btn-ghost btn-sm"
-                disabled={!editable || !canAddBox(current) || adding === current.id}
-                onClick={() => setAdding(current.id)}
-              >
-                <PlusIcon width={15} height={15} /> Add a box
-              </button>
-              {stim !== null && !current.rects.includes(stim) && (
-                <button
-                  className="btn btn-ghost btn-sm"
-                  disabled={!editable || !canPutAbove(current, stim)}
-                  onClick={() => apply(putAbove(crops, current.id, stim))}
-                >
-                  Put the stimulus above
-                </button>
-              )}
-              {/* Only on a draft (§4.3): on a saved question it would delete the question. */}
-              {selRect && selQuestion && !savedIds.has(selQuestion.id) && selQuestion.rects.length === 1 && (
-                <button
-                  className="btn btn-ghost btn-sm"
-                  disabled={!editable}
-                  title="Print this box once above several questions"
-                  onClick={() => {
-                    apply(makeStimulus(crops, selRect.id));
-                    setStim(selRect.id);
+              </span>
+            )}
+            <div className="flex items-center gap-2 flex-wrap" style={{ marginLeft: "auto" }}>
+              {found && (
+                <span
+                  style={{
+                    color: "var(--ink-soft)",
+                    fontSize: 12.5,
+                    fontWeight: 700,
+                    padding: "2px 9px",
+                    border: "1px solid var(--line-strong)",
+                    borderRadius: 999,
+                    whiteSpace: "nowrap",
                   }}
                 >
-                  Stimulus
-                </button>
-              )}
-              {/* A draft has no row to pick yet: a pick of it could never resolve. */}
-              {savedIds.has(current.id) && (
-                <button
-                  className="btn btn-ghost btn-sm"
-                  aria-pressed={picks.includes(current.id)}
-                  onClick={() => togglePick(current.id)}
-                >
-                  {picks.includes(current.id) ? (
-                    <>
-                      <CheckIcon width={15} height={15} /> Picked
-                    </>
-                  ) : (
-                    "Pick"
-                  )}
-                </button>
-              )}
-              {selRect && selQuestion && current.rects.length > 1 && selRect.page === page && (
-                <button className="btn btn-ghost btn-sm" disabled={!editable} onClick={removeSelected}>
-                  Remove box
-                </button>
-              )}
-              <button
-                className="btn btn-danger btn-sm"
-                disabled={!editable}
-                onClick={() => apply(deleteQuestion(crops, current.id), null)}
-              >
-                <TrashIcon width={15} height={15} /> Delete question
-              </button>
-              {adding === current.id ? (
-                <span style={{ color: "var(--berry-deep)", fontWeight: 700 }}>
-                  Drag on this page or another to add box {current.rects.length + 1}. Esc cancels.
+                  {KIND[found.kind]}
                 </span>
-              ) : (
-                current.rects.length >= MAX_BOXES && (
-                  <span style={{ color: "var(--ink-soft)" }}>
-                    Four boxes at most: crop the rest as another question.
-                  </span>
-                )
               )}
-            </>
-          ) : (
-            <span style={{ color: "var(--ink-soft)" }}>
-              {saving
-                ? "Saving…"
-                : failure?.kind === "reload"
-                  ? "Reload the page to go on cropping."
-                  : !here
-                    ? "Finding suggestions…"
-                    : !found
-                      ? "Suggestions failed on this page. Drag to draw a box."
-                      : offered.length
-                        ? "Click a dashed box to accept it, or drag to draw a box."
-                        : "No suggestions on this page. Drag to draw a box."}
-              {items.length > 0 && !saving && failure?.kind !== "reload" && " Click a box to change it."}
-              <span className="hidden pointer-coarse:inline"> Two fingers scroll.</span>
-            </span>
-          )}
-          {stimRect && (!selIsStim || selTwice) && (
-            <span className="flex items-center gap-1.5" style={{ color: "var(--berry-deep)", fontWeight: 700 }}>
-              New questions go under the stimulus on p. {stimRect.page}.
-              <button className="btn btn-quiet btn-sm" onClick={() => setStim(null)}>
-                Done
-              </button>
-            </span>
-          )}
-          <div className="flex items-center gap-2 flex-wrap" style={{ marginLeft: "auto" }}>
-            {found && (
-              <span
-                style={{
-                  color: "var(--ink-soft)",
-                  fontSize: 12.5,
-                  fontWeight: 700,
-                  padding: "2px 9px",
-                  border: "1px solid var(--line-strong)",
-                  borderRadius: 999,
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {KIND[found.kind]}
-              </span>
-            )}
-            {offered.length > 0 && (
-              <button className="btn btn-ghost btn-sm" disabled={!editable} onClick={acceptAll}>
-                Accept all ({offered.length})
-              </button>
-            )}
-            {topics.length > 0 && (
-              <label className="flex items-center gap-2" style={{ color: "var(--ink-soft)" }}>
-                New questions
-                <select
-                  className="field"
-                  style={{ width: "auto", padding: "5px 10px", fontSize: 13.5 }}
-                  value={newTopic}
-                  onChange={(e) => setNewTopic(e.target.value)}
-                  aria-label="Topic for new questions"
-                >
-                  <option value="">No topic</option>
-                  {topics.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
+              {sure.length > 0 && (
+                <button className="btn btn-ghost btn-sm" disabled={!editable} onClick={acceptAll}>
+                  Accept all ({sure.length})
+                </button>
+              )}
+              {topics.length > 0 && (
+                <label className="flex items-center gap-2" style={{ color: "var(--ink-soft)" }}>
+                  New questions
+                  <select
+                    className="field"
+                    style={{ width: "auto", padding: "5px 10px", fontSize: 13.5 }}
+                    value={newTopic}
+                    onChange={(e) => setNewTopic(e.target.value)}
+                    aria-label="Topic for new questions"
+                  >
+                    <option value="">No topic</option>
+                    {topics.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+            </div>
           </div>
+          {/* A file with answers in it is cropped from a clean copy (§2.1 item
+              16); boxes can still be drawn by hand on this one. */}
+          {bankFound && answerPages.length > 0 && (
+            <div style={ANSWERS}>
+              {bankFound.answerKey
+                ? "This file looks like an answer key. Upload a clean copy without the answers and crop that."
+                : `This file has answers on ${pagesText(answerPages)}. Upload a clean copy without the answer pages and crop that.`}
+            </div>
+          )}
         </div>
       )}
 
@@ -1207,6 +1380,16 @@ export function PageView(props: PageViewProps) {
   );
 }
 
+// The answers notice, a strip under the toolbar.
+const ANSWERS = {
+  padding: "8px 16px",
+  background: "var(--berry-wash)",
+  borderBottom: "1px solid #f1c7cd",
+  color: "var(--berry-deep)",
+  fontWeight: 700,
+  fontSize: 14,
+} as const;
+
 const ALERT = {
   padding: "10px 14px",
   marginBottom: 12,
@@ -1216,6 +1399,85 @@ const ALERT = {
   fontWeight: 700,
   fontSize: 14,
 } as const;
+
+/**
+ * The toolbar for a suggestion tapped that asks first (§4.3): one with a "?",
+ * with its reasons, and every continuation, which is accepted onto the question
+ * it continues when that is on screen with room, or else as a question of its
+ * own, or skipped.
+ */
+function AskedSuggestion({
+  s,
+  on,
+  at,
+  question,
+  disabled,
+  onAccept,
+  onAsQuestion,
+  onSkip,
+}: {
+  s: Offer;
+  /** A continuation's question, and the question on screen it is (null: not cropped). */
+  on: { ref: QuestionRef; id: string | null } | null;
+  /** Where in that question's boxes the continuation goes (crops.ts continuesAt): the bank's order. */
+  at: number | null;
+  question: (id: string) => CropQuestion | undefined;
+  disabled: boolean;
+  onAccept: () => void;
+  onAsQuestion: () => void;
+  onSkip: () => void;
+}) {
+  const q = on?.id ? question(on.id) : undefined;
+  const room = canAddBox(q);
+  const where = on ? `question ${on.ref.n} on p. ${on.ref.page}` : "";
+  return (
+    <>
+      <span style={{ fontWeight: 800 }}>
+        {s.type !== "continuation"
+          ? nameOf(s)
+          : q
+            ? room
+              ? `Continues ${where}`
+              : `Continues ${where}, which has four boxes already`
+            : `Continues ${where}, which isn't cropped yet`}
+      </span>
+      {s.check && (
+        <span className="inline-flex items-center gap-1.5" style={{ color: "var(--ink-soft)" }}>
+          <span
+            className="mono"
+            style={{
+              fontSize: 11,
+              fontWeight: 700,
+              padding: "1px 6px",
+              borderRadius: 6,
+              background: "var(--honey-deep)",
+              color: "#fff",
+            }}
+          >
+            ?
+          </span>
+          {s.check.join("; ")}
+        </span>
+      )}
+      {s.type !== "continuation" ? (
+        <button className="btn btn-ghost btn-sm" disabled={disabled} onClick={onAccept}>
+          <CheckIcon width={15} height={15} /> Accept
+        </button>
+      ) : room ? (
+        <button className="btn btn-ghost btn-sm" disabled={disabled} onClick={onAccept}>
+          <PlusIcon width={15} height={15} /> Add as box {(at ?? q!.rects.length) + 1}
+        </button>
+      ) : (
+        <button className="btn btn-ghost btn-sm" disabled={disabled} onClick={onAsQuestion}>
+          Accept as a question
+        </button>
+      )}
+      <button className="btn btn-quiet btn-sm" onClick={onSkip}>
+        Skip
+      </button>
+    </>
+  );
+}
 
 function Notice({ title, body, onRetry }: { title: string; body?: string; onRetry?: () => void }) {
   return (

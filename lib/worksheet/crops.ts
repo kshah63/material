@@ -9,6 +9,7 @@
 // every copy. The diff turns rectangles back into each question's box list.
 import type { BankBox, BankQuestion } from "@/lib/queries";
 import type { SaveBox, SaveChanges, SaveEdit } from "@/app/actions/questions";
+import type { QuestionRef, Suggestion } from "./propose";
 import type { PdfBox, ViewRect } from "./source";
 
 /** A question holds four boxes at most (§2.2). */
@@ -207,14 +208,16 @@ function prune(rects: Record<string, CropRect>, questions: CropQuestion[]): Crop
 
 const newRect = (id: string, page: number, box: PdfBox): CropRect => ({ id, page, box, rows: {} });
 
-/** A new question with one box, under the stimulus `under` if one is given. */
+/** A new question with one box of its own, under the stimulus `under` (or each of several, in order) if given. */
 export function addQuestion(
   c: Crops,
   q: { id: string; topic_id: string | null },
   rect: { id: string; page: number; box: PdfBox },
-  under: string | null,
+  under: string | readonly string[] | null,
 ): Crops {
-  const stim = under !== null && c.rects[under] ? [under] : [];
+  const stim = (under === null ? [] : typeof under === "string" ? [under] : under)
+    .filter((id) => c.rects[id])
+    .slice(0, MAX_BOXES - 1);
   return {
     rects: { ...c.rects, [rect.id]: newRect(rect.id, rect.page, rect.box) },
     questions: [...c.questions, { id: q.id, topic_id: q.topic_id, rects: [...stim, rect.id] }],
@@ -223,17 +226,24 @@ export function addQuestion(
 
 export const canAddBox = (q: CropQuestion | undefined) => !!q && q.rects.length < MAX_BOXES;
 
-/** A box added at the end of a question, on any page: how a question continues. */
+/**
+ * A box added to a question, on any page: how a question continues. It goes at
+ * the end, or at `at` in its list (an accepted continuation, continuesAt).
+ */
 export function addBox(
   c: Crops,
   questionId: string,
   rect: { id: string; page: number; box: PdfBox },
+  at?: number,
 ): Crops {
   const q = c.questions.find((x) => x.id === questionId);
-  if (!canAddBox(q)) return c;
+  if (!q || !canAddBox(q)) return c;
+  const i = at ?? q.rects.length;
   return {
     rects: { ...c.rects, [rect.id]: newRect(rect.id, rect.page, rect.box) },
-    questions: c.questions.map((x) => (x === q ? { ...x, rects: [...x.rects, rect.id] } : x)),
+    questions: c.questions.map((x) =>
+      x === q ? { ...x, rects: [...x.rects.slice(0, i), rect.id, ...x.rects.slice(i)] } : x,
+    ),
   };
 }
 
@@ -300,37 +310,258 @@ export function setTopic(c: Crops, questionId: string, topicId: string | null): 
   };
 }
 
-// --- reading order (§5.1 rule 9) ------------------------------------------------
+// --- accepting suggestions (§4.3, §5.1) -------------------------------------------
+// A continuation, stem or context names its questions by page and printed number
+// (propose.ts QuestionRef). The screen finds each as boxes: the question suggested
+// on that page with that number, then the question on screen, saved or accepted,
+// with a box over it. Nothing is saved until the page is.
+
+/** A suggestion as the screen offers it: its page, and an id of its own. */
+export type Offer = Suggestion & { id: string; page: number };
+
+/** Every page's suggestions, page 1 first (propose.ts FileSuggestions.pages). */
+export type FoundPages = readonly { readonly proposals: readonly Suggestion[] }[];
+
+/** A page's suggestions as offers, each id `s:{page}:{index in the page's list}`. */
+export function offersOn(found: FoundPages, page: number): Offer[] {
+  return (found[page - 1]?.proposals ?? []).map((s, i) => ({ ...s, id: `s:${page}:${i}`, page }));
+}
+
+const across = (a: ViewRect, b: ViewRect) => a.x < b.x + b.w && b.x < a.x + a.w;
+
+/**
+ * The suggested question a continuation, stem or context names: the question
+ * suggested on that page with that number. A page can number two sections
+ * alike: a continuation's is then the last of them, the question left open at
+ * the page's foot (R51), and a stem's the first not above it in its column
+ * (R52).
+ */
+export function namedQuestion(found: FoundPages, from: Offer, ref: QuestionRef): Suggestion | null {
+  const alike = (found[ref.page - 1]?.proposals ?? []).filter((s) => s.type === "question" && s.n === ref.n);
+  if (from.type === "continuation") return alike[alike.length - 1] ?? null;
+  const below =
+    ref.page === from.page ? alike.filter((s) => !(s.view.y < from.view.y && across(s.view, from.view))) : alike;
+  return below[0] ?? alike[0] ?? null;
+}
+
+/** The rectangle on `page` most over `box`, if one is over it at all (IoU over 0.5, as uncropped hides a suggestion). */
+function rectOver(c: Crops, page: number, box: PdfBox): CropRect | null {
+  let best: { r: CropRect; v: number } | null = null;
+  for (const r of Object.values(c.rects)) {
+    const v = r.page === page ? iou(r.box, box) : 0;
+    if (v > 0.5 && (!best || v > best.v)) best = { r, v };
+  }
+  return best?.r ?? null;
+}
+
+/**
+ * The question on screen, saved or drawn here, with a box on `page` over this
+ * box: a question's own box before a stimulus, then the one most over it.
+ */
+export function questionAt(c: Crops, page: number, box: PdfBox, users = usersOf(c)): string | null {
+  let best: { q: string; own: boolean; v: number } | null = null;
+  for (const r of Object.values(c.rects)) {
+    const v = r.page === page ? iou(r.box, box) : 0;
+    if (v <= 0.5) continue;
+    const own = !isStimulus(c, r.id, users);
+    for (const q of users.get(r.id) ?? []) {
+      if (!best || (own && !best.own) || (own === best.own && v > best.v)) best = { q, own, v };
+    }
+  }
+  return best?.q ?? null;
+}
+
+/** The questions a continuation, stem or context names, each with the question on screen it is, or null if not cropped yet. */
+export function namedOnScreen(
+  c: Crops,
+  found: FoundPages,
+  from: Offer,
+): { ref: QuestionRef; id: string | null }[] {
+  const users = usersOf(c);
+  return (from.for ?? []).map((ref) => {
+    const s = namedQuestion(found, from, ref);
+    return { ref, id: s ? questionAt(c, ref.page, s.box, users) : null };
+  });
+}
+
+/**
+ * The question on screen a continuation continues, and where in its list the
+ * continuation's box goes: by where it falls in the bank, not by when it was
+ * accepted. It goes before the first of the question's boxes after its own that
+ * comes later in the bank, on a later page or later in the same run on this
+ * page (the finder's box number: a column's continuation before the next
+ * column's), so a box 3 accepted before box 2 still prints third. Null when its
+ * question is not cropped yet.
+ */
+export function continuesAt(c: Crops, found: FoundPages, s: Offer): { id: string; at: number } | null {
+  const ref = s.for?.[0];
+  const named = ref ? namedQuestion(found, s, ref) : null;
+  const id = ref && named ? questionAt(c, ref.page, named.box) : null;
+  const q = id === null ? undefined : c.questions.find((x) => x.id === id);
+  if (!ref || !named || !q) return null;
+  const own = rectOver(c, ref.page, named.box);
+  // The box number of a box of this question that is an accepted continuation of it.
+  const boxNoOf = (r: CropRect) => {
+    const o = offersOn(found, r.page).find((x) => x.type === "continuation" && iou(x.box, r.box) > 0.5);
+    const of = o?.for?.[0] ? namedQuestion(found, o, o.for[0]) : null;
+    return of && sameBox(of.box, named.box) ? o!.boxNo : undefined;
+  };
+  for (let i = own ? q.rects.indexOf(own.id) + 1 : 0; i < q.rects.length; i++) {
+    const r = c.rects[q.rects[i]];
+    if (r.page > s.page || (r.page === s.page && (boxNoOf(r) ?? 0) > (s.boxNo ?? 2))) return { id: q.id, at: i };
+  }
+  return { id: q.id, at: q.rects.length };
+}
+
+/**
+ * The stems and contexts accepted on screen that name this suggested question,
+ * in the bank's order: each a rectangle on its own page over its suggested box.
+ * The question goes under them when it is accepted, wherever they are.
+ */
+export function stimuliOver(c: Crops, found: FoundPages, q: Offer): string[] {
+  const out: string[] = [];
+  for (let page = 1; page <= found.length; page++) {
+    for (const s of offersOn(found, page)) {
+      if ((s.type !== "stem" && s.type !== "context") || !s.for) continue;
+      const names = s.for.some((ref) => {
+        const named = ref.page === q.page && ref.n === q.n ? namedQuestion(found, s, ref) : null;
+        return !!named && sameBox(named.box, q.box);
+      });
+      const r = names ? rectOver(c, s.page, s.box) : null;
+      if (r && !out.includes(r.id)) out.push(r.id);
+    }
+  }
+  return out;
+}
+
+/** What accepting needs besides the suggestions. */
+export interface Accepting {
+  /** The topic for new questions. */
+  topic: string | null;
+  /** The stimulus in hand: a question no accepted stem names goes under it, as a drawn one does. */
+  stim: string | null;
+  /** A new id: a question's (a uuid, as save_crops takes it) or a rectangle's. */
+  newId: (what: "question" | "rect") => string;
+}
+
+/**
+ * Suggestions accepted (§4.3), as drafts:
+ * - a question becomes a new question, under the accepted stems and contexts
+ *   that name it, or else under the stimulus in hand;
+ * - a stem or context becomes a stimulus, box 1 of each question it names that
+ *   is on screen; the rest go under it when they are accepted;
+ * - a continuation becomes a box of the question it continues, in the bank's
+ *   order (continuesAt).
+ * Stems and contexts are taken first, so the questions accepted with them go
+ * under them. Four boxes stay the limit: a question with no room is left as it
+ * is and returned in `full`, and a continuation whose question is not on screen
+ * is not taken, and returned in `left`.
+ */
+export function acceptOffers(
+  c: Crops,
+  found: FoundPages,
+  offers: readonly Offer[],
+  how: Accepting,
+): { crops: Crops; rects: string[]; full: string[]; left: Offer[] } {
+  let next = c;
+  const rects: string[] = [];
+  const full: string[] = [];
+  const left: Offer[] = [];
+  const rank = (s: Offer) => (s.type === "stem" || s.type === "context" ? 0 : 1);
+  for (const s of [...offers].sort((a, b) => rank(a) - rank(b))) {
+    const rect = { id: how.newId("rect"), page: s.page, box: s.box };
+    if (s.type === "stem" || s.type === "context") {
+      const ids = namedOnScreen(next, found, s).flatMap((x) => (x.id ? [x.id] : []));
+      next = {
+        rects: { ...next.rects, [rect.id]: { ...newRect(rect.id, rect.page, rect.box), stimulus: true } },
+        questions: next.questions,
+      };
+      for (const id of new Set(ids)) {
+        const after = putAbove(next, id, rect.id);
+        if (after === next) full.push(id);
+        next = after;
+      }
+    } else if (s.type === "continuation") {
+      const to = continuesAt(next, found, s);
+      const q = to && next.questions.find((x) => x.id === to.id);
+      if (!to || !q) {
+        left.push(s);
+        continue;
+      }
+      if (!canAddBox(q)) {
+        full.push(q.id);
+        continue;
+      }
+      next = addBox(next, q.id, rect, to.at);
+    } else {
+      const over = stimuliOver(next, found, s);
+      next = addQuestion(
+        next,
+        { id: how.newId("question"), topic_id: how.topic },
+        rect,
+        over.length ? over : how.stim,
+      );
+    }
+    rects.push(rect.id);
+  }
+  return { crops: next, rects, full, left };
+}
+
+// --- reading order (§5.1, Reading order) -----------------------------------------
 
 // Tops this close, in points, are one row: the cells of a grid row, side by side.
 const ROW = 6;
 // Boxes this close across a gutter, in points, are cells of one table: a grid's
-// cell ends at the next cell's label (§5.1 rule 7). Two columns' boxes end at
-// their ink, and the centre's banks leave 16 pt or more between them.
+// cell ends at the next cell's label (§5.1, Box edges). Two columns' boxes end
+// at their ink, and the centre's banks leave 16 pt or more between them.
 const TOUCH = 8;
+// Tops this close, in points, line up exactly: questions set two or three to a row.
+const ALIGN = 3;
+// A column whose tops are this far apart, in points, on the median, holds
+// questions with room to work under them; a list down a column is closer set.
+const PITCH = 40;
+
+type Placed = { id: string; v: ViewRect };
 
 /**
  * Reading order of the boxes on one page, as displayed: columns left to right,
- * then top to bottom, and left to right along a row. A column gutter is the
- * widest band of the middle 30-70% of the page that no box crosses, however
- * narrow, and only if each side has two boxes or more. Boxes side by side at the
- * same height that all but touch across it, on most rows, are a grid, a problem
- * set printed as a table, which is read row by row and never split (§5.1 rule
- * 5). Rows that merely line up are not: two columns numbered down each column
- * often do.
+ * each top to bottom, and left to right along a row. A page can have two
+ * columns or three. A box across them (a stem over both, a wide question under
+ * them) with nothing beside it in a column it reaches into is a band of its
+ * own: what is above it is read first, columns and all, then it, then what is
+ * below, each part read the same way. A box across a gutter with something
+ * beside it there, a line run long, is read in the column it starts in.
  */
-export function readingOrder(
-  items: { id: string; v: ViewRect }[],
-  width: number,
-): Map<string, number> {
-  const g = gutter(items, width);
-  const columns =
-    g === null
-      ? [items]
-      : [items.filter((i) => i.v.x + i.v.w <= g), items.filter((i) => i.v.x >= g)];
+export function readingOrder(items: Placed[], width: number): Map<string, number> {
   const order = new Map<string, number>();
-  for (const column of columns) for (const it of byRows(column)) order.set(it.id, order.size);
+  for (const it of arrange(items, width)) order.set(it.id, order.size);
   return order;
+}
+
+const right = (v: ViewRect) => v.x + v.w;
+const crosses = (v: ViewRect, g: number) => v.x < g && right(v) > g;
+
+function arrange(items: Placed[], width: number): Placed[] {
+  const gs = gutters(items, width);
+  if (!gs.length) return byRows(items);
+  // A box's column is the one its left edge is in.
+  const col = (v: ViewRect) => gs.filter((g) => v.x >= g).length;
+  const across = (v: ViewRect) => gs.some((g) => crosses(v, g));
+  const beside = (a: ViewRect, b: ViewRect) =>
+    col(b) > col(a) && b.x < right(a) && b.y < a.y + a.h && a.y < b.y + b.h;
+  const bands = items
+    .filter((a) => across(a.v) && !items.some((b) => !across(b.v) && beside(a.v, b.v)))
+    .sort((a, b) => a.v.y - b.v.y);
+  if (!bands.length) {
+    return Array.from({ length: gs.length + 1 }, (_, k) => arrange(items.filter((i) => col(i.v) === k), width)).flat();
+  }
+  const out: Placed[] = [];
+  let rest = items.filter((i) => !bands.includes(i));
+  for (const b of bands) {
+    out.push(...arrange(rest.filter((i) => i.v.y < b.v.y), width), b);
+    rest = rest.filter((i) => i.v.y >= b.v.y);
+  }
+  return [...out, ...arrange(rest, width)];
 }
 
 function byRows<T extends { v: ViewRect }>(items: T[]): T[] {
@@ -350,33 +581,85 @@ function byRows<T extends { v: ViewRect }>(items: T[]): T[] {
 }
 
 /** How far apart two boxes are across, in points: below zero when they overlap. */
-const apart = (a: ViewRect, b: ViewRect) => Math.max(a.x - (b.x + b.w), b.x - (a.x + a.w));
+const apart = (a: ViewRect, b: ViewRect) => Math.max(a.x - right(b), b.x - right(a));
 
-function gutter(items: { v: ViewRect }[], width: number): number | null {
-  // The widest band of the middle 30-70% that no box crosses, measured exactly:
-  // a gutter between two columns' boxes can be 2 pt.
+/** The median distance between the tops of a column's boxes, one under the next. */
+function pitch(columns: Placed[][]): number {
+  const d = columns
+    .flatMap((c) => {
+      const ys = c.map((i) => i.v.y).sort((a, b) => a - b);
+      return ys.slice(1).map((y, k) => y - ys[k]);
+    })
+    .sort((a, b) => a - b);
+  return d.length ? d[Math.floor(d.length / 2)] : 0;
+}
+
+/**
+ * The column gutters, left to right. A gutter is in the middle 30-70% of the
+ * page, where fewer boxes cross than on either side of it, and fewer than half
+ * the page's: measured exactly between box edges (two columns' boxes can be
+ * 2 pt apart), at the middle of the band, the emptiest bands first and then the
+ * widest. Every column the gutters make holds two boxes or more wholly inside
+ * it. Two columns either side of a gutter are read row by row instead, and the
+ * gutter dropped, when they are a grid, a problem set printed as a table: boxes
+ * side by side at the same height that all but touch across it, on most rows,
+ * or a box across it that does. They are also read row by row when their tops
+ * line up exactly on most rows and the questions have room to work under them:
+ * questions set two to a row. Short boxes that line up are a list numbered down
+ * each column, which they often are (§5.1, Reading order).
+ */
+function gutters(items: Placed[], width: number): number[] {
   const lo = 0.3 * width;
   const hi = 0.7 * width;
-  let band: [number, number] | null = null;
-  let from = lo; // the right edge of the boxes so far, left to right
-  const spans = items
-    .filter((i) => i.v.x < hi && i.v.x + i.v.w > lo)
-    .map((i) => [i.v.x, i.v.x + i.v.w])
-    .sort((a, b) => a[0] - b[0]);
-  for (const [x0, x1] of [...spans, [hi, hi]]) {
-    if (x0 > from && (!band || x0 - from > band[1] - band[0])) band = [from, x0];
-    from = Math.max(from, x1);
+  const edges = items.flatMap((i) => [i.v.x, right(i.v)]).filter((x) => x > lo && x < hi);
+  const xs = Array.from(new Set([lo, hi, ...edges])).sort((a, b) => a - b);
+  // The bands between edges, each with how many boxes cross it, neighbours as full merged.
+  const bands: { a: number; b: number; n: number }[] = [];
+  for (let k = 0; k + 1 < xs.length; k++) {
+    const m = (xs[k] + xs[k + 1]) / 2;
+    const n = items.filter((i) => crosses(i.v, m)).length;
+    const last = bands[bands.length - 1];
+    if (last && last.n === n) last.b = xs[k + 1];
+    else bands.push({ a: xs[k], b: xs[k + 1], n });
   }
-  if (!band) return null;
-  const g = (band[0] + band[1]) / 2;
-  const left = items.filter((i) => i.v.x + i.v.w <= g);
-  const right = items.filter((i) => i.v.x >= g);
-  if (left.length < 2 || right.length < 2) return null;
-  const [few, many] = left.length <= right.length ? [left, right] : [right, left];
-  const cells = few.filter((a) =>
-    many.some((b) => Math.abs(a.v.y - b.v.y) <= ROW && apart(a.v, b.v) <= TOUCH),
-  ).length;
-  return cells * 2 > few.length ? null : g;
+  const valleys = bands
+    .filter((d, k) => (k === 0 || bands[k - 1].n > d.n) && (k === bands.length - 1 || bands[k + 1].n > d.n))
+    .filter((d) => d.n * 2 < items.length)
+    .sort((p, q) => p.n - q.n || q.b - q.a - (p.b - p.a));
+  const columnsOf = (gs: number[]) => {
+    const bounds = [-Infinity, ...gs, Infinity];
+    return bounds.slice(1).map((r, k) => items.filter((i) => i.v.x >= bounds[k] && right(i.v) <= r));
+  };
+  let gs: number[] = [];
+  for (const d of valleys) {
+    const next = [...gs, (d.a + d.b) / 2].sort((a, b) => a - b);
+    if (columnsOf(next).every((c) => c.length >= 2)) gs = next;
+  }
+  // Then each gutter against the two columns either side of it, until none is dropped.
+  for (;;) {
+    const columns = columnsOf(gs);
+    const k = gs.findIndex((g, k) => {
+      const [few, many] =
+        columns[k].length <= columns[k + 1].length ? [columns[k], columns[k + 1]] : [columns[k + 1], columns[k]];
+      const beside = (dy: number, dx: number) =>
+        few.filter((a) => many.some((b) => Math.abs(a.v.y - b.v.y) <= dy && apart(a.v, b.v) <= dx)).length * 2 >
+        few.length;
+      const cell = items.some(
+        (a) =>
+          crosses(a.v, g) &&
+          items.some((b) => b !== a && b.v.x >= g && Math.abs(a.v.y - b.v.y) <= ROW && apart(a.v, b.v) <= TOUCH),
+      );
+      return (
+        columns[k].length < 2 ||
+        columns[k + 1].length < 2 ||
+        cell ||
+        beside(ROW, TOUCH) ||
+        (pitch([few, many]) >= PITCH && beside(ALIGN, Infinity))
+      );
+    });
+    if (k < 0) return gs;
+    gs = gs.filter((_, i) => i !== k);
+  }
 }
 
 // --- the save -------------------------------------------------------------------
