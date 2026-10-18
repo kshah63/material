@@ -19,7 +19,12 @@ export function Modal({
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key !== "Escape") return;
+      // The Escape that closes the modal is the modal's: it goes no further, to
+      // a screen underneath that listens on window (the page view lets go of
+      // its selection on one).
+      e.stopPropagation();
+      onClose();
     };
     document.addEventListener("keydown", onKey);
     document.body.style.overflow = "hidden";

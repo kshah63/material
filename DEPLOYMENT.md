@@ -267,4 +267,8 @@ returning name, position;
   `/pdfjs/wasm/`, for example through a school filter or proxy that blocks
   `.wasm` files. Without them a scanned page would draw blank, so the page view
   refuses to open a bank until they can be fetched.
+- **Make worksheet says "the homework template answered 404".** The two
+  worksheet templates are in git, under `public/worksheet/`, and are served as
+  they are; a deploy that left `public/` out, or a filter blocking
+  `/worksheet/`, stops every worksheet.
 ```

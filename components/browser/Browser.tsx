@@ -24,6 +24,7 @@ import {
   PdfIcon,
   UsersIcon,
   DriveIcon,
+  CropIcon,
 } from "@/components/icons";
 import {
   createFolder,
@@ -267,20 +268,30 @@ export function Browser(props: BrowserProps) {
         {/* header */}
         <div className="flex items-start justify-between gap-4 mb-2">
           <Breadcrumb courseId={courseId} courseName={courseName} crumbs={breadcrumb} />
-          {caps.canManage && (
+          {caps.canSeeTeacherOnly && (
             <div className="flex items-center gap-1 shrink-0">
               <Link
-                href={`/courses/${courseId}/people`}
+                href={`/courses/${courseId}/questions`}
                 className="btn btn-quiet btn-sm"
               >
-                <UsersIcon width={16} height={16} /> People
+                <CropIcon width={16} height={16} /> Questions
               </Link>
-              <Link
-                href={`/courses/${courseId}/trash`}
-                className="btn btn-quiet btn-sm"
-              >
-                <TrashIcon width={16} height={16} /> Trash
-              </Link>
+              {caps.canManage && (
+                <>
+                  <Link
+                    href={`/courses/${courseId}/people`}
+                    className="btn btn-quiet btn-sm"
+                  >
+                    <UsersIcon width={16} height={16} /> People
+                  </Link>
+                  <Link
+                    href={`/courses/${courseId}/trash`}
+                    className="btn btn-quiet btn-sm"
+                  >
+                    <TrashIcon width={16} height={16} /> Trash
+                  </Link>
+                </>
+              )}
             </div>
           )}
         </div>

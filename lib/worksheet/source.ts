@@ -255,6 +255,23 @@ export function pageBox(page: PDFPageProxy): PdfBox {
   return { x0, y0, x1, y1 };
 }
 
+/**
+ * The part of a box on its page, inside pageBox(page), or null if none is.
+ * pdf.js does not clip to the CropBox, so a box reaching past it would draw
+ * whatever the MediaBox holds there (§6.3). Only a crafted save stores such a
+ * box: the page view keeps the boxes it draws on the page.
+ */
+export function clipToPage(page: PDFPageProxy, box: PdfBox): PdfBox | null {
+  const p = pageBox(page);
+  const out = {
+    x0: Math.max(box.x0, p.x0),
+    y0: Math.max(box.y0, p.y0),
+    x1: Math.min(box.x1, p.x1),
+    y1: Math.min(box.y1, p.y1),
+  };
+  return out.x1 > out.x0 && out.y1 > out.y0 ? out : null;
+}
+
 /** A PDF-space box on the displayed page. pdf.js applies /Rotate and the CropBox offset. */
 export function toViewRect(viewport: PageViewport, box: PdfBox): ViewRect {
   const [ax, ay] = viewport.convertToViewportPoint(box.x0, box.y0) as number[];
@@ -286,9 +303,10 @@ export function toPdfBox(viewport: PageViewport, rect: ViewRect): PdfBox {
 
 /**
  * The only caller of page.render (§4.5): draws one box of a page onto the
- * canvas, at `scale` canvas pixels per point. The viewport's offsets put the
- * box's top-left corner at the canvas origin, and the canvas is sized to the
- * box. pageBox(page) draws the whole page. pdf.js's defaults are kept on
+ * canvas, at `scale` canvas pixels per point, only as much of it as is on the
+ * page (clipToPage). The viewport's offsets put the box's top-left corner at
+ * the canvas origin, and the canvas is sized to the box. pageBox(page) draws
+ * the whole page. pdf.js's defaults are kept on
  * purpose: the display intent and the default annotation mode, so it draws what
  * the page view showed; the print intent turns on layers a teacher edition hides
  * on screen (§6.3). `recordImages` also has pdf.js note where the page's images
@@ -303,7 +321,9 @@ export function renderRegion(
   canvas: HTMLCanvasElement,
   recordImages = false,
 ): RenderTask {
-  const r = toViewRect(page.getViewport({ scale }), box);
+  const shown = clipToPage(page, box);
+  if (!shown) throw new Error("the box is off its page");
+  const r = toViewRect(page.getViewport({ scale }), shown);
   canvas.width = Math.max(1, Math.round(r.w));
   canvas.height = Math.max(1, Math.round(r.h));
   const viewport = page.getViewport({ scale, offsetX: -r.x, offsetY: -r.y });

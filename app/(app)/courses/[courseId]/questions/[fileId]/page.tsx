@@ -16,17 +16,18 @@ export const dynamic = "force-dynamic";
 /**
  * The page view (docs/WORKSHEETS.md §4.3): one bank, page by page, with its
  * saved crops. Managers crop on a bank can_crop_file allows; everyone else, and
- * a manager on a bank students can see, picks.
+ * a manager on a bank students can see, picks. ?page= is the page to open, and
+ * ?topic= a topic to narrow it to, from the Questions page's filter.
  */
 export default async function QuestionsPageView({
   params,
   searchParams,
 }: {
   params: Promise<{ courseId: string; fileId: string }>;
-  searchParams: Promise<{ page?: string | string[] }>;
+  searchParams: Promise<{ page?: string | string[]; topic?: string | string[] }>;
 }) {
   const { courseId, fileId } = await params;
-  const { page } = await searchParams;
+  const { page, topic } = await searchParams;
   const profile = await requireProfile();
   const isAdmin = profile.app_role === "admin";
 
@@ -49,17 +50,18 @@ export default async function QuestionsPageView({
   ]);
 
   const first = Number(Array.isArray(page) ? page[0] : page);
+  // Only one of the course's own topics; anything else is Any topic.
+  const asked = Array.isArray(topic) ? topic[0] : topic;
 
   return (
     <PageView
       userId={profile.id}
       courseId={courseId}
-      courseName={course.name}
+      course={{ name: course.name, code: course.code }}
       file={{
         id: file.id,
         name: file.name,
         size_bytes: file.size_bytes,
-        folder_id: file.folder_id,
         eff_teacher_only: file.eff_teacher_only,
       }}
       questions={questions}
@@ -67,6 +69,7 @@ export default async function QuestionsPageView({
       mode={canCrop ? "crop" : "pick"}
       manager={caps.canManage}
       initialPage={Number.isInteger(first) && first >= 1 ? first : null}
+      initialTopic={topics.some((t) => t.id === asked) ? asked! : null}
     />
   );
 }

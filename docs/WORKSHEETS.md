@@ -5,8 +5,8 @@ answered its five open questions (§2.1, items 10–14), and again after a
 review of that revision. The owner then asked for it to be built small: each
 crop's picture is made on demand, when a worksheet is drawn (§6.3), and there
 is no AI step for now (§2.1 item 9). The database, PR 1, is built (§3), and
-so is the page view, PR 2 (§4.3, with its "as built" notes); the Questions
-page and the worksheet are not. The reviews' findings,
+so are the page view, PR 2 (§4.3), and the Questions page and the worksheet,
+PR 3 (§4.2, §4.4, §6), each with its "as built" notes. The reviews' findings,
 and the few this plan does not take, are listed at the end.
 
 ## 1. What it is and who uses it
@@ -242,8 +242,25 @@ The owner (Kartik) answered the plan's five open questions later on
 
 ### 2.3 Open questions for the owner
 
-None. The five this plan asked were answered on 2026-10-17, and are §2.1,
-items 10–14.
+The five this plan asked were answered on 2026-10-17, and are §2.1, items
+10–14. PR 3's review left two, each built one way until the owner says
+otherwise:
+
+- **The 0.55 working-space cap** (§6.2). The settlement said both that no
+  box is shrunk to fit a page height and that a question that fits keeps the
+  working-space rule, the 0.55 × 247 mm cap. Applied as a shrink, the cap
+  printed a box from a digital bank that just fits a page at 0.60 of its
+  width's scale (11 pt text at 6.6 pt), and the same box 20 pt taller, which
+  no longer fits with its source line, at 1.04 on a page of its own. PR 3
+  reads the cap as the line below which a question leaves room for working,
+  never as a shrink, so no question is printed smaller to make that room.
+  Restoring it is one line in `scaleOf`.
+- **Which page number the source line gives** (§6.1). It is the PDF's own page,
+  as the page view and the Viewer count them. A booklet that numbers its pages
+  from its first content page prints a different number at the foot: in "U4
+  BOOKLET WORKSHEET 1 (L1-8)", PDF pages 11–14 print 10–13, and the file has
+  no page labels to say so. A teacher working from the printed booklet or a
+  mark scheme keyed to printed pages lands one page off.
 
 ## 3. Data model
 
@@ -582,6 +599,26 @@ Hand edits in the same PR:
   back empty is dropped like a missing one (§3.2). It then signs the banks
   (§4.4).
 
+**As built (PR 3).**
+
+- **`preparePicks` makes two flat reads, not the one select above.** The
+  picked questions with their `files` row embedded (`files!inner`, filtered to
+  the course, so a pick of another course comes back missing), and their
+  boxes, `.in("question_id", ids)`, in a read of their own, made into
+  questions by the page view's own reader (`bankOf` in
+  `lib/worksheet/crops.ts`). A project's max rows caps an embedded list too:
+  the browser harness, run with PostgREST's `db-max-rows = 3`, printed a
+  four-box question with three boxes and said nothing. Both reads go a range
+  at a time through `readAllRows`, like `listFileQuestions`, so a project's
+  max rows never passes for picks that are gone. A worksheet takes 200 picks
+  at most, which keeps the reads' request line short; a call with more is
+  refused with that number.
+- **`listQuestionSources`** reads the view a range at a time too, by file id,
+  for the same reason; it has no limit of its own.
+- **The topic filter** (§4.2) counts the chosen topic's questions per bank:
+  `questions` with that `topic_id`, `.in("file_id", the course's cropped
+  banks)`, a range at a time (`countTopicQuestions`).
+
 Measured on a scratch Postgres 16 with Supabase's own `auth.uid()`, seeded as
 a level's bank-holding course after some years (§8.1), among many other
 courses: 201,600 questions and 234,066 boxes (16% with a second box), 12 banks
@@ -695,6 +732,10 @@ The screens follow the existing ones:
 opens the page view. The header's *Questions* link is not there yet: it comes
 with the Questions page in PR 3, so `CropIcon` has one use for now.
 
+**As built (PR 3).** The course header has *Questions*, with `CropIcon`, for
+anyone who can see teacher-only material, and *People* and *Trash* after it
+for managers only.
+
 ### 4.2 Questions: the cropped banks
 
 **Route:** `app/(app)/courses/[courseId]/questions/page.tsx`.
@@ -731,6 +772,26 @@ The picks bar (§4.4) shows here too while there are picks.
   back when it is restored."
 - **Empty, teachers:** "Nothing cropped in this course. Question banks are
   kept in each level's question-bank course, in your course list."
+
+**As built (PR 3).** `app/(app)/courses/[courseId]/questions/page.tsx` reads
+`listQuestionSources`, `listAllFolders` and `listTopics`, and renders
+`components/questions/QuestionsView.tsx`. Where it differs from the text
+above, or adds to it:
+
+- **Topic filter.** A select whose first row is *Any topic*, hidden while the
+  course has no topics or nothing is cropped. A topic is `?topic=` on the
+  page, so the server reads the counts (§3.5) and only one of the course's own
+  topics filters. Rows narrow to banks with a question of that topic, and the
+  count line reads "2 Fractions questions · 19 in all". With a topic, a row
+  opens the page view at `?topic=`, which sets its Topic select and so opens
+  at the first page with that topic; without one, at `?page=` the bank's first
+  page with questions. A topic no bank has reads "No question in this course
+  has this topic".
+- **Rows** are links, labelled by `bankPath` (`lib/worksheet/layout.ts`), the
+  same label the worksheet's bank order sorts by. The warning line is red, and
+  for managers it goes on "Make it teacher-only to change its crops."
+- **The picks bar** is `components/questions/PicksBar.tsx`, the same as the
+  page view's: "{n} picked · *Make worksheet* · ×".
 
 **Why there is no list of every crop.** The first draft listed crops as
 thumbnails across all banks, 50 a page, with source and topic filters. Every
@@ -976,6 +1037,22 @@ differs from the text above:
   refuses a caller who is not signed in and changes that are not the shape
   above, before anything reaches the database. `preparePicks` comes in PR 3.
 
+**As built (PR 3).**
+
+- **The back link** goes to Questions and reads "Questions", now there is a
+  Questions page, with the page view's topic as `?topic=`, so the next bank
+  is found by the same topic. A save also revalidates
+  `/courses/[courseId]/questions` by its route pattern, so the counts there
+  are fresh.
+- **`?topic=`** opens the page view on one of the course's topics (from the
+  Questions page's filter). The page and the topic are both kept in the URL
+  across a reload.
+- **The picks bar** gains *Make worksheet* (§4.4). In crop mode it saves the
+  bank first, since what prints is what is saved. While the modal is open the
+  page view takes no keys, so Delete inside the modal cannot delete a box
+  behind it; the Esc that closes the modal stops there, so it does not also
+  let go of the in-charge's selection.
+
 ### 4.4 Make worksheet
 
 **Picks** are question ids in `sessionStorage` under one key per course, read
@@ -1026,8 +1103,8 @@ contains:
 - each pick with its picture, its source line and topic ("Fractions.pdf ·
   p. 4 · Fractions") and remove ×. The source line is what the worksheet
   prints under the question (§6.2): the bank's file name and the pages its
-  boxes are on, in box order, as "p. 4", "pp. 4–5", or "pp. 4, 9" when they
-  are not adjacent;
+  boxes are on, in page order with adjacent pages merged, as "p. 4", "pp.
+  4–5", or "pp. 4, 9" when they are not adjacent (§6.1 as built);
 - **Label:** *Lesson* | *Homework*, default Homework;
 - *Download PDF* (primary), enabled once every pick is drawn.
 
@@ -1048,6 +1125,57 @@ slower on an iPad (§6.4).
 
 **On failure** to fetch or draw from a bank, no PDF is made, and the error
 names the bank, e.g. "bank.pdf could not be read: …".
+
+**As built (PR 3).** `components/questions/WorksheetModal.tsx`, mounted by the
+picks bar on the Questions page and on the page view. Where it differs from
+the text above, or adds to it:
+
+- **Opening** reads the picks once with `preparePicks` (§3.5 as built), the
+  picks at hand when it opened; picks removed later are the modal's own. The
+  status line reads "Reading the picks…", "Fetching bank.pdf (2 of 3)…" (with
+  the size for a bank over 10 MB) and "Drawing question 4 of 12…". Every bank
+  downloads at once through `openBank`, held until the modal closes. A pick
+  whose bank page is past the bank's end, or with a box wholly off its page,
+  is dropped with the missing ones, and all of them leave the tab's picks.
+- **Picks the action will not read.** A pick that is not a question id as the
+  database writes one (lower case), which only a tab's storage edited by hand
+  holds, comes back as missing and is removed with the same line; it no longer
+  refuses the whole set. Over 200 picks is refused with how many there are and
+  where to un-pick them ("… and 201 are picked. Un-pick some on their banks'
+  pages, or clear the picks with × and pick again."), with no *Try again*,
+  which could only fail the same way. When every pick is gone, nothing is sent
+  to be signed (Storage refuses an empty list), so the line still shows.
+- **Drawing.** Each pick's scale is `scaleOf` (§6.2), worked out from its
+  boxes' displayed sizes before anything is drawn, so each box is drawn once,
+  at the size it prints. Boxes are drawn in bank and page order, with
+  `page.cleanup()` after each page's last. A page with an image that did not
+  decode (`imagesFailed`, §8.3) fails its bank, like a failed download.
+- **The list** shows each pick's JPEGs, at their printed widths against the
+  content area's 180 mm, with a grey placeholder of the right shape until
+  drawn; the source line as it prints (§6.1), except that a name too long for
+  180 mm shows in full here and is cut with "…" in the PDF; its topic; and ×.
+  Beside the label strip: "13 questions on 11 pages", from the layout (§6.2).
+  "Drawing question 2 of 4…" counts the list, so a pick removed while drawing
+  leaves the count too.
+- **Label** is a two-tab strip, Lesson | Homework, Homework first chosen.
+- **Cancel** shows while the modal prepares; it, ×, Esc and a click outside
+  all close it, which cancels the render in hand, releases the banks and frees
+  the pictures.
+- **Download PDF** stays enabled after a download, so the other label can be
+  downloaded from the same pictures; the modal closes only when the teacher
+  closes it. The 25 MB warning is about the last download. A failure to make
+  the PDF (the template not fetched, say) is an error toast.
+- **Errors.** A bank that fails names itself ("scanned.pdf could not be read:
+  The download failed. Try again.") and offers *Try again*, which opens that
+  bank afresh in a new pdf.js worker (`closeBank`, §8.3) and draws again; a
+  PDF that needs a password, or is not one, gets no *Try again*. Beside it,
+  *Remove its 2 picks* takes that bank's picks out of the tab and makes the
+  worksheet again from the rest: such a bank's own page view may not open
+  either, so without it the only way out was clearing every pick. Once a bank
+  has failed, the banks still downloading report nothing more, so the error
+  stays on screen.
+- **Esc** closes the modal and goes no further: the page view under it keeps
+  its selection (`Modal` stops the key's propagation).
 
 ### 4.5 Shared code
 
@@ -1120,6 +1248,32 @@ for if AI is built later.
   the boxes being saved, drawn by hand or not.
 - `compose.ts` comes in PR 3.
 
+**As built (PR 3).**
+
+- **`lib/worksheet/layout.ts`** is pure (no pdf.js, pdf-lib or DOM): `PAGE`,
+  the templates' page size; `contentArea`; `scaleOf` and `layout`, boxes in
+  and positions out (§6.2); `pagesText`, `winAnsi` and `sourceLine` (§6.1);
+  `bankPath` and `printOrder` (§4.4); and `worksheetName` (§6.5).
+  `supabase/tests/worksheet.mjs` tests it in Node (§9.1).
+- **`clipToPage(page, box)`** in `source.ts`: the part of a box inside the
+  page's own box, or null. pdf.js does not clip to the CropBox, so
+  `renderRegion` draws only that part, and a box reaching past the CropBox no
+  longer draws what the MediaBox holds there (§6.3).
+- **`lib/worksheet/compose.ts`**, loaded with `import()` by the modal, so
+  pdf-lib is fetched only when a worksheet is made:
+  - `boxSize(page, box)`: the displayed size at scale 1, after `/Rotate`, of
+    the box's part on its page; null if none is, and the modal drops the pick;
+  - `drawBox(page, box, scale, canvas, signal)`: `renderRegion` at scale ×
+    300 ÷ 72, then `canvas.toBlob` as JPEG at 0.9. The signal cancels the
+    render;
+  - `template(label)`: `/worksheet/template-{label}.pdf`, fetched once per
+    tab, a failure not kept;
+  - `save(questions, template, title)`: `embedPdf` once, `drawPage` on each
+    page, `embedJpg` with the bytes unchanged, the source line with
+    `drawText` in `StandardFonts.Helvetica`, `setTitle`. Each picture is drawn
+    at its own pixels × 72 ÷ 300, so `pdfimages` reads exactly 300 dpi; that
+    is within half a pixel of its box's printed size.
+
 ### 4.6 Everything touched
 
 **New files:**
@@ -1170,6 +1324,22 @@ for if AI is built later.
 - PR 3 adds the Questions page, `QuestionsView`, `WorksheetModal`,
   `compose.ts`, `preparePicks`, `listQuestionSources`, `pdf-lib` and the
   templates.
+
+**As built (PR 3).**
+
+- New: the Questions page's route (§4.2);
+  `components/questions/{QuestionsView,WorksheetModal,PicksBar}.tsx`;
+  `lib/worksheet/{layout,compose}.ts`; `public/worksheet/template-lesson.pdf`
+  and `template-homework.pdf`, moved from `docs/worksheets/`, where the HTML
+  they were printed from stays; `supabase/tests/worksheet.mjs`.
+- Changed: `app/actions/questions.ts` (`preparePicks`, and `savePage`
+  revalidates the Questions page); `lib/queries.ts` (`listQuestionSources`,
+  `countTopicQuestions`, and `readAllRows` exported);
+  `components/questions/PageView.tsx` and its route (the picks bar's *Make
+  worksheet*, the back link, `?topic=`); `components/browser/Browser.tsx`
+  (the *Questions* link); `proxy.ts`, whose matcher now skips `worksheet/`
+  too; `package.json` (`pdf-lib` 1.17.1, exactly); `supabase/tests/run.sh`;
+  `README.md`; `DEPLOYMENT.md`.
 
 ## 5. Suggestions
 
@@ -1476,7 +1646,10 @@ top. Nothing of the template is redrawn.
 
 - **Files:** `public/worksheet/template-lesson.pdf` (25,655 bytes) and
   `template-homework.pdf` (26,961 bytes), the PDFs the Pencil template's
-  Lesson and Homework boards were made from. PR 3 commits them.
+  Lesson and Homework boards were made from. PR 3 moved them there from
+  `docs/worksheets/`, where the HTML they were printed from stays. `proxy.ts`
+  skips `/worksheet/`, as it does `/pdfjs/`, so fetching a template costs no
+  session check; they are the centre's blank branded page, nothing more.
 - **How:** compose embeds the chosen label's template once (`embedPdf`) and
   draws it as each page's background (`drawPage`), then draws the crops on
   top.
@@ -1505,6 +1678,35 @@ top. Nothing of the template is redrawn.
   3 repeats it, and it must then print the template's words and one source
   line per question, and nothing else.
 
+**As built (PR 3).**
+
+- **The source line** reads the bank's file name without ".pdf" and its
+  pages: "U4 BOOKLET WORKSHEET 1 (L1-8) · p. 12", "… · pp. 12–13". Pages are
+  the distinct pages of its boxes in page order, consecutive ones as a range:
+  "pp. 4, 9", "pp. 4–5, 9".
+- **"p." is the PDF's own page,** counted from 1 as the page view and the
+  Viewer count them, so the line and the portal agree. It is not the number
+  printed at the foot of a page, which a booklet may start later: in "U4
+  BOOKLET WORKSHEET 1 (L1-8)", PDF pages 11–14 print 10–13, so the question
+  whose line reads "p. 12" sits above a printed "11". The file has no page
+  labels (`/PageLabels`) that could say so; where a bank has them, pdf.js's
+  `getPageLabels()` could give the printed one. To confirm with the owner
+  (§2.3). It is small grey sans text, 8 pt Helvetica (pdf-lib's
+  `StandardFonts.Helvetica`, not embedded) in the template's label grey
+  `#B4B8C5`, 2 mm under the question's last box and inside the content area.
+  A name too long for 180 mm is cut short with "…", and the pages always stay.
+- **Characters Helvetica cannot draw are replaced, never thrown on**
+  (`winAnsi`): a letter outside WinAnsi keeps its letter and every accent
+  WinAnsi still has with it ("ố" prints as "ô", "ậ" as "â", "ő" as "o"), "Đ"
+  prints as the identical "Ð" and "đ" as "d", white space is a space, and
+  anything else is "?" ("Đại số 数学" prints as "Ðai sô ??"). The test runs
+  every character of the Basic Multilingual Plane through it and through
+  pdf-lib's Helvetica.
+- **Tested** on a worksheet from two synthetic banks and one of the centre's
+  (§9.1): `pdftotext` prints, per page, "HOMEWORK" and "MathVision", and one
+  source line per question, nothing else; `pdffonts` lists the template's
+  Inter Type 3 fonts and Helvetica (Type 1, WinAnsi), nothing else.
+
 ### 6.2 Placing crops
 
 - **Content area:** from 15 mm to 195 mm across, and from 26 mm below the top
@@ -1515,21 +1717,50 @@ top. Nothing of the template is redrawn.
   4 pt of margin round its ink (§5.1 rule 7). Its source
   line (§6.1) follows 2 mm under the last box, at 8 pt in the template's
   label grey, `#B4B8C5`, and is never scaled.
-- **One question:** scale = min(1.25, 180 mm ÷ its widest box, 0.55 × 247 mm
-  ÷ its stacked height), where the stacked height is the sum of its boxes'
-  heights. The rest of the page is blank for working.
-- **Two short questions share a page:**
-  - a question is *short* if its printed height at that scale, boxes and
-    source line together, is 74 mm or less;
+
+**As built (PR 3), settled by the owner** so that every box stays readable.
+The rule is `scaleOf` and `layout` in `lib/worksheet/layout.ts`:
+
+- **One scale per question,** from its width: min(1.25, 180 mm ÷ its widest
+  box). No page height shrinks it, save the one exception below.
+- **A question that fits one page** at that scale, boxes and source line
+  within 247 mm, prints at that scale from the top of its page, and the rest
+  of the page is for working. Two short questions share a page:
+  - a question is *short* if its printed height, boxes and source line
+    together, is 74 mm or less;
   - two short questions in a row share a page, and the second starts at the
     content area's vertical midpoint;
   - any other question gets a page of its own.
-  - Picks keep bank order (§2.2).
-- **Not settled: a question over several pages.** The rule above suits the
-  common case, a stimulus over a one-box question. A past paper's question
-  over four full pages would print at about a seventh of its size, so PR 3
-  decides how such a question flows (for example one page per box) and
-  prints one before relying on it.
+- **A question that does not fit one page is never shrunk to fit a page
+  height.** Its boxes are laid one under another at its width's scale, from
+  the top of a new page; a box that does not fit under the one before it
+  starts the next page, and the last box needs room for the source line too,
+  so the line is never alone on a page. The working space is the rest of the
+  page after the last box, and the next question starts a new page. A
+  past paper's question over four full pages prints at its full width's scale,
+  a box a page.
+- **A box too tall for a page by itself** at that scale is the one exception,
+  since it cannot be printed whole otherwise: its question's scale comes down
+  until that box fits a page with its source line under it. No box is ever
+  cut, and a box no taller than an A4 page still prints at 81% of its size or
+  more.
+- **The 0.55 × 247 mm cap is not a shrink.** The plan's formula also capped
+  a question at 0.55 × 247 mm ÷ its stacked height, and the settlement kept
+  that cap for a question that fits. Applied as a shrink, it printed a
+  question a little under a page tall at as little as 0.56 of its width's
+  scale, while one a little taller, which flows, printed at full scale.
+  Measured: a box 482 × 640 pt from `digital.pdf` printed at 0.602 (102 ×
+  136 mm, its 11 pt text at 6.6 pt), and the same box 20 pt taller at 1.040
+  (177 × 242 mm). That is the opposite of every box staying readable, so
+  after review the cap shrinks nothing. It only describes what a question
+  gets: one no taller than 0.55 × 247 mm at its width's scale leaves at least
+  45% of its page for working, and a taller one keeps its scale and has the
+  rest of its page. The pair above now prints at 1.059 and 1.040. Owner to
+  confirm (§2.3).
+- Picks keep bank order (§2.2).
+- **Tested** by `supabase/tests/worksheet.mjs` (§9.1), and printed: a
+  four-box question flowing over a page break, a box taller than a page alone
+  on its page at 0.98, two short questions to a page.
 - **Rotation.** Crop sizes here are the displayed size, after the source
   page's `/Rotate`. pdf.js renders the page as displayed, so the picture is
   already upright and is drawn with no rotation. Tested on a `/Rotate 90`
@@ -1551,6 +1782,14 @@ Every crop, from every bank, digital or scanned, is drawn the same way
 3. **One canvas serves every box,** and is set to 0 × 0 once the last box is
    drawn, because Safari is slow to free canvas memory.
 
+**As built (PR 3).** Every crop of the sample worksheets (§9.1) is one JPEG,
+which `pdfimages -list` reads at 300 × 300 ppi, at its printed size within
+half a pixel. A question that flows (§6.2) can print a box up to the content
+area's full height, so the largest canvas is now 180 × 242 mm at 300 dpi:
+about 2126 × 2860 px, 6.1 million pixels and 24 MB, still under half of what
+iOS Safari allows one canvas. A page-tall box from the grey test scan came
+out 2014 × 2860 px and about 950 KB (§8.1).
+
 What this keeps out, and what it keeps:
 
 - Only the boxes' pixels reach the worksheet. No text, font, layer or image
@@ -1565,6 +1804,12 @@ What this keeps out, and what it keeps:
   In testing, a crop from a bank whose Answers layer is off for viewing and
   on for printing came out without the answers with the display intent, and
   with them with `intent: "print"`.
+- **As built (PR 3):** only the part of a box on its page is drawn
+  (`clipToPage`, §4.5). pdf.js does not clip to the CropBox, so a box
+  reaching past it, which only a crafted save stores, drew whatever the
+  MediaBox holds there: in testing, a box over the left margin of a page
+  whose CropBox starts 70 pt in drew 893 red pixels of text outside it, and
+  none once clipped. A box wholly off its page drops its pick (§4.4).
 
 Two choices, measured in Node 22 with pdfjs-dist 6.4.299 on `@napi-rs/canvas`
 1.0.11 (Skia, the graphics library Chrome uses), on the test banks that
@@ -1579,19 +1824,19 @@ pages as a noisy 200 ppi scan):
 - **Scans at 300 dpi too.** A 200 ppi scan is upsampled, which adds bytes but
   no detail: capped at the scan's own density, its crops were 111 KB against
   239 KB. That cap would have compose measure each scanned page's density.
-  One rule for every page is simpler, and worksheets stay far under 25 MB
-  (§8.1).
+  One rule for every page is simpler, and a usual worksheet of 5 to 20 crops
+  stays well under 25 MB; one of many page-tall scan crops does not (§8.1).
 
 **Memory.** pdf-lib never reads a bank; it loads only the 26 KB template.
 Beyond the picked banks, which stay open while the modal is (§4.5), the modal
 holds one canvas, the decoded images of the page it is drawing from (released
 by `page.cleanup()` after that page's last pick), the held JPEGs (about 4 MB
-for 20 picks from a scan), and, on *Download PDF*, the saved file. 20 picks
-from 20 pages of a 300 ppi colour scan peaked at about 310 MB in Node with
-the cleanup and about 750 MB without it. The largest canvas is the largest
-crop the content area allows, 180 × 136 mm at 300 dpi: 2126 × 1605 px, or
-13 MB of pixels, about a fifth of the 4096 × 4096 that iOS Safari allows one
-canvas.
+for 20 picks from a scan, about 19 MB for 20 page-tall ones), and, on
+*Download PDF*, the saved file. 20 picks from 20 pages of a 300 ppi colour
+scan peaked at about 310 MB in Node with the cleanup and about 750 MB
+without it. The largest canvas is the largest box the layout prints, 180 ×
+242 mm at 300 dpi (§6.2): about 2126 × 2860 px, or 24 MB of pixels, about a
+third of the 4096 × 4096 that iOS Safari allows one canvas.
 
 ### 6.4 Where it runs, and why
 
@@ -1682,6 +1927,12 @@ The pattern is `MathVision {Label} {course code, else course name}
   dropped.
 - The PDF's Title is the same name, without `.pdf`.
 
+**As built (PR 3).** `worksheetName` in `lib/worksheet/layout.ts`: the
+course's code when it has one that is not blank, else its name; letters of any
+script and decimal digits are kept, and round and square brackets. Downloaded
+in the browser as "MathVision Homework IM2T 2026-10-17 2324.pdf", and the toast
+read "Downloaded MathVision Homework IM2T 2026-10-17 2324.pdf · 2.5 MB".
+
 ## 7. Getting it into Pencil
 
 Pencil has no boards API or files API, so the portal pushes nothing. The
@@ -1735,8 +1986,15 @@ The owner has not given volumes. The design handles the following:
   is a picture (§6.3): about 95 KB from a digital page and 239 KB from the
   4-page, 200 ppi test scan of §6.3, so 20 questions are about 2 MB, or 5 MB
   from scans. A 300 ppi colour scan's crops averaged 198 KB, and its largest
-  510 KB. The largest crop the page allows was 219 KB from a digital page and
-  586 KB from the grey scan, so even 40 of those stay under 25 MB.
+  510 KB.
+- **As built (PR 3), the largest crop** is a box the layout prints up to
+  180 × 242 mm (§6.2), not 136 mm as planned. A page-tall crop came to about
+  0.4 MB from a digital page, 0.95 MB from the grey test scan and 0.8 MB from
+  the colour one: five questions of four page-tall boxes made a 20-page
+  worksheet of 18.6 MB from the grey scan, and 15.3 MB in 12 s from the
+  colour one (Node). So about 27 page-tall crops from the grey scan, or 33
+  from the colour one, pass 25 MB, and the modal's warning (§4.4) is what
+  says so.
 - **The tab, while the modal is open,** holds every picked bank (§4.5): with
   1 to 4 banks, up to 4 × the largest bank.
 - **Rendering a page** for the page view at 2048 px wide took 20–86 ms from a
@@ -1761,8 +2019,9 @@ The owner has not given volumes. The design handles the following:
   the session and `can_crop_file` itself, keeps its key server-only, caps the
   body and stores nothing.
 - **Worksheet:** it is built in the teacher's browser and never uploaded.
-  Every crop is a picture of its box alone (§6.3), so the file carries
-  nothing of a bank beyond the questions picked, wherever it is sent. It is
+  Every crop is a picture of its box alone, and only of its part on the
+  page (§6.3), so the file carries nothing of a bank beyond the questions
+  picked, wherever it is sent. It is
   never locked, whatever lock the bank had (§2.1 item 14).
 
 ### 8.3 Failure modes
@@ -1785,9 +2044,16 @@ The owner has not given volumes. The design handles the following:
 | A bank students can see | It cannot be cropped. Once cropped, its crops are locked until it is teacher-only again, and the Questions page marks it. |
 | A worksheet over 25 MB | It downloads, with a warning (§4.4). |
 | A bank is purged | Its crops go with it, and the purge is unaffected (§3.3). |
-| A picked question's bank went to Trash, or the crop was deleted | The modal drops it from the picks and says how many were removed. |
+| A picked question's bank went to Trash, or the crop was deleted | The modal drops it from the picks and says how many were removed, also when every pick is gone (§4.4). |
+| A tab's picks edited by hand (not question ids) | Dropped like a deleted question; the rest are made (§4.4). |
+| More than 200 picks | Refused with how many there are and where to un-pick them, and no *Try again* (§4.4). |
 | A bank's bytes are replaced in Storage under the same name | Every crop points at different content. §9.4 item 4. |
 | A box saved on a page past the bank's end (only by a crafted call) | The page view ignores it, and the modal drops its pick as removed (§4.3, §4.4). |
+| A box reaching past its page's CropBox (only by a crafted call) | Only its part on the page is drawn; a box wholly off its page drops its pick as removed (§6.3, §4.4). |
+| A bank fails to download or draw while the modal prepares | No PDF; the error names the bank, *Try again* opens it afresh, and *Remove its picks* makes the worksheet from the other banks (§4.4). |
+| A bank's file name has characters Helvetica cannot draw | They are replaced in its source line; compose never throws on one (§6.1). |
+| The worksheet template cannot be fetched | No PDF; an error toast says why. The templates are in git, under `public/worksheet/`. |
+| A project's max rows is below what a read returns | Every worksheet read goes a range at a time, so nothing is cut short (§3.5). |
 
 **As built (PR 2).**
 
@@ -1917,17 +2183,88 @@ narrower than 1% of the page, a box across the gutter, one box a side, a
 rotated page); a question's own box deleted under a shared stimulus; and a
 teacher reading what the in-charge saved.
 
+**As built (PR 3).** `run.sh` then runs `supabase/tests/worksheet.mjs`, which
+needs no database: the layout of `lib/worksheet/layout.ts`, boxes in and
+positions out on the templates' page, and the source line in pdf-lib's own
+Helvetica. Its 14 checks: a one-box question; a narrow box at 1.25 at most; two
+short questions sharing a page, and 74 mm exactly being short; a four-box
+question over a page break, never shrunk; a last box moved on so its source
+line fits; a box wider than 180 mm; a question nearly a page tall at its
+width's scale, as is one 20 pt taller that flows; a box taller than a page,
+alone and at 81% or more; 400 random worksheets, every box and line inside the
+content area, in order, never overlapping, and at their width's scale unless
+a box is taller than a page; the source line for one page, two pages and pages
+apart; a non-WinAnsi file name keeping the accents WinAnsi has, and every
+character of the Basic Multilingual Plane encoding in Helvetica after
+`winAnsi`; a name too long for 180 mm; the file name; and print order, a
+stimulus's questions by their second box. Against 14 deliberate breakages of
+the layout (the cap, the line's room, the pairing, the 74 mm, the flow, the
+tall box, the replacement, page order, the 1.25, the 2 mm gap, the cut, the
+order, the name's characters, the midpoint) it failed on every one; after
+review, also on the 0.55 cap put back as a shrink, on accents all stripped,
+and on "Đ" left to "?".
+
 **Manual checks:**
 
 - the §5.1 rules on the test banks and on 20 real pages;
 - `pdftotext`, `pdffonts` and `pdfimages -list` on a worksheet: the only
-  text and fonts are the template's, and each crop is one JPEG at 300 dpi of
-  its printed size;
+  text is the template's words and one source line per question, the only
+  fonts the template's and the source lines' Helvetica, and each crop is one
+  JPEG at 300 dpi of its printed size;
 - a crop from a test bank whose Answers layer is off for viewing and on for
   printing (`layered.pdf` from `docs/worksheets/raster/make-banks.py`) comes
   out without the answers;
 - a worksheet page overlaid on the template PDF: identical by construction,
   so this checks only where the crops sit.
+
+**As built (PR 3), the manual checks run:**
+
+- **In Node,** with the repo's `compose.ts` and `layout.ts` on pdfjs-dist
+  6.4.299 and `@napi-rs/canvas`, as the modal makes one: 14 questions from
+  `make-banks.py`'s digital and scanned banks and from "U4 BOOKLET WORKSHEET 1
+  (L1-8)", one of the centre's banks, read as data. They included a four-box
+  question over three bank pages, two questions under one stimulus, short
+  pairs, a question over pp. 12–13, and a box of a whole page. 20 boxes, 12
+  pages, 2.6 MB, 2.3 s with the banks' opening; made again after review
+  without the cap (§6.2), 2.7 MB and 1.8 s, the pp. 12–13 question at 1.04
+  where it had printed at 0.71. Both times `pdftotext` printed
+  "HOMEWORK" and "MathVision" on each page and the 14 source lines, nothing
+  else; `pdffonts` the template's five Inter Type 3 fonts and Helvetica;
+  `pdfimages -list` the template's own mark (one image and its soft mask,
+  drawn on every page) and 20 JPEGs, every one 300 × 300 ppi.
+- **In a browser,** through the crop screen's scratch harness (PostgREST with
+  `db-max-rows = 3`, banks served locally): a teacher opened Questions from
+  the course header, filtered by a topic into the page view, picked two
+  questions by clicking their boxes and had eleven more in the tab, one
+  pick of a question that no longer exists among them. The modal dropped it
+  with its line, drew 19 boxes from three banks in 3.5 s, and downloaded
+  "MathVision Homework IM2T 2026-10-17 2324.pdf", 2.5 MB, 11 pages, which
+  passed the same three checks: 13 source lines for 13 questions, 19 JPEGs at
+  300 ppi. Also checked there: a pick removed in the modal, the Lesson label,
+  Cancel while drawing, the Questions page's own picks bar, a bank whose
+  download fails (named, *Try again* recovers), the modal at 390 px wide, and
+  the manager's line on a bank students can see.
+- **After review,** each fix replayed the way its finding was reproduced. In
+  Node: the ws5 pair of §6.2 printed at 0.602 and 1.040 before and 1.059 and
+  1.040 after; a box over the left margin of a page whose CropBox starts
+  70 pt in drew 893 red pixels from outside it before and none after, and a
+  box wholly off the page reads as no size, so its pick is dropped;
+  `preparePicks` called as a teacher against PostgREST, with Storage's
+  refusal of an empty list stood in, signed `[]` and failed before, and now
+  returns every pick as missing without signing; a pick that is not a
+  question id, or an upper-case one, comes back missing instead of refusing
+  the set or printing while also being removed. In the browser harness, its
+  signing stand-in now refusing an empty list as Storage does: a bank that
+  is not a PDF, and one whose download keeps failing, each offered *Remove
+  its pick*, after which the other banks' picks were made and the tab kept
+  only theirs; two picks of gone questions were removed with their line;
+  two bad strings among the picks were removed and the good one made; 201
+  picks read "… and 201 are picked …" with no *Try again*; two picks
+  removed while drawing brought "Drawing question 1 of 4…" beside "4
+  questions on 16 pages"; Esc closing the modal kept the in-charge's
+  selection (and Esc with no modal still lets it go); and the back link from
+  a page view opened at a topic went to Questions at that topic, and to Any
+  topic once that was chosen there.
 
 ### 9.2 Rollout
 
@@ -1996,7 +2333,7 @@ teacher reading what the in-charge saved.
    - The unmerged branch `claude/awesome-bell-udvk0q` also edits `proxy.ts`.
      Whichever lands second merges the other first.
 4. **PR 3, the Questions page and the worksheet:** the picks, the modal,
-   compose and the two template PDFs.
+   compose and the two template PDFs. **Built** (§4.2, §4.4, §6).
 5. **AI: not for now** (§2.1 item 9). If it is wanted later, only for a
    scanned bank that is going to be cropped. None of the centre's own banks
    has a scanned question page (§9.2.1). If the textbook banks are not scans
@@ -2176,7 +2513,8 @@ them. On the rest, every number of each run is present exactly once.
 2026-10-17. What they ran on is kept in `docs/worksheets/`, as files that
 nothing applies or serves:
 
-- `template-{lesson,homework}.pdf`, with the HTML each was printed from;
+- `template-{lesson,homework}.html`, which the two templates were printed
+  from; the PDFs are served from `public/worksheet/` since PR 3;
 - `textlayer/propose.mjs`: §5.1's suggestions as measured on the sample
   banks (§9.2.1). It draws each page's proposals onto a PNG and prints them as
   JSON, with each box also in PDF space, as `compose.mjs` takes it;
@@ -2195,9 +2533,9 @@ superseded them: the shim is now `supabase/tests/shim.sql`, unchanged, and
 the migration, its tests and their runner were redrawn for several boxes as
 `supabase/migrations/20261017000009_questions.sql`,
 `supabase/tests/questions.sql` and `supabase/tests/run.sh`. The drafts are in
-the history at 9cbe177. PR 3 moves `template-{lesson,homework}.pdf` to `public/worksheet/` (§6.1, §9.2
-step 4). `raster/` and `textlayer/` are evidence only and move nowhere; PR 2
-writes §5.1 for the browser.
+the history at 9cbe177. PR 3 moved `template-{lesson,homework}.pdf` to
+`public/worksheet/` (§6.1, §9.2 step 4). `raster/` and `textlayer/` are
+evidence only and move nowhere; PR 2 writes §5.1 for the browser.
 
 ## Review notes
 

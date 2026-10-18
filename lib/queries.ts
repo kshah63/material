@@ -9,6 +9,7 @@ import type {
   Folder,
   Profile,
   QuestionBox,
+  QuestionSource,
   QuestionTopic,
 } from "./types";
 import { bankOf } from "./worksheet/crops";
@@ -343,7 +344,7 @@ const RANGE = 1000;
  * between two ranges can repeat or skip a row; repeats are dropped by id, and an
  * edit built on a list that skipped a box is refused by save_crops (§3.4 step 3).
  */
-async function readAllRows<T extends { id: string }>(
+export async function readAllRows<T extends { id: string }>(
   range: (
     from: number,
     to: number,
@@ -405,4 +406,57 @@ export async function listFileQuestions(fileId: string): Promise<BankQuestion[]>
   // A question's place is its first box by box_no, whatever that number is: the
   // readers never look for box_no = 1 (§3.2).
   return bankOf(questions, boxes);
+}
+
+// Worksheet maker: the Questions page's reads (docs/WORKSHEETS.md §3.5, §4.2) ----
+
+/**
+ * The course's cropped banks, one row each (question_sources), RLS-scoped: a bank
+ * in Trash has no boxes anyone can read, so it is not listed. No limit: the
+ * course's files bound it. Read a range at a time all the same, by file id, so a
+ * project's max rows never ends the list early.
+ */
+export async function listQuestionSources(courseId: string): Promise<QuestionSource[]> {
+  const supabase = await createClient();
+  const rows = await readAllRows<QuestionSource & { id: string }>((from, to, count) =>
+    supabase
+      .from("question_sources")
+      // The file id once more as `id`, which readAllRows keeps one row of each by.
+      .select(
+        "id:file_id, course_id, file_id, file_name, folder_id, eff_teacher_only, questions, pages, first_page",
+        count ? { count: "exact" } : undefined,
+      )
+      .eq("course_id", courseId)
+      .order("file_id", { ascending: true })
+      .range(from, to),
+  ).catch((err: Error) => {
+    throw new Error(`Could not read the course's cropped banks: ${err.message}`);
+  });
+  return rows;
+}
+
+/**
+ * How many questions of each of these banks have the topic, for the Questions
+ * page's topic filter: the topic's rows a range at a time, counted by bank.
+ */
+export async function countTopicQuestions(
+  topicId: string,
+  fileIds: string[],
+): Promise<Map<string, number>> {
+  const counts = new Map<string, number>();
+  if (!fileIds.length) return counts;
+  const supabase = await createClient();
+  const rows = await readAllRows<{ id: string; file_id: string }>((from, to, count) =>
+    supabase
+      .from("questions")
+      .select("id, file_id", count ? { count: "exact" } : undefined)
+      .eq("topic_id", topicId)
+      .in("file_id", fileIds)
+      .order("id", { ascending: true })
+      .range(from, to),
+  ).catch((err: Error) => {
+    throw new Error(`Could not count the topic's questions: ${err.message}`);
+  });
+  for (const r of rows) counts.set(r.file_id, (counts.get(r.file_id) ?? 0) + 1);
+  return counts;
 }

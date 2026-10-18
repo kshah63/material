@@ -2,7 +2,10 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { listFileQuestions, type BankQuestion } from "@/lib/queries";
+import { createServiceClient } from "@/lib/supabase/service";
+import { listFileQuestions, readAllRows, type BankBox, type BankQuestion } from "@/lib/queries";
+import { bankOf } from "@/lib/worksheet/crops";
+import { bankPath } from "@/lib/worksheet/layout";
 
 // The crop screen's one write (docs/WORKSHEETS.md §3.4, §4.3): every change to
 // one bank since its last save, in one save_crops call, which is one transaction
@@ -188,11 +191,13 @@ export async function savePage(fileId: string, changes: SaveChanges): Promise<Sa
     return { ok: false, kind: "retry", code, error: "Not saved. Try again." };
   }
 
-  // Every page view, by its route pattern, rather than a path the caller names.
-  // Nothing is cached on the server, but in a Server Function this also has the
-  // browser fetch the pages it visited before afresh when they are opened again
-  // (Next's revalidatePath docs), so none shows this bank as it was.
+  // Every page view and Questions page, by their route patterns, rather than a
+  // path the caller names. Nothing is cached on the server, but in a Server
+  // Function this also has the browser fetch the pages it visited before afresh
+  // when they are opened again (Next's revalidatePath docs), so none shows this
+  // bank as it was.
   revalidatePath("/courses/[courseId]/questions/[fileId]", "page");
+  revalidatePath("/courses/[courseId]/questions", "page");
   return readBack(fileId);
 }
 
@@ -208,4 +213,147 @@ async function readBack(fileId: string): Promise<SaveResult> {
       error: "Saved, but the page could not be read back. Reload page to see it.",
     };
   }
+}
+
+// --- the worksheet modal's one read (§4.4) --------------------------------------
+
+/** A picked question as the worksheet modal draws it, its boxes in print order (box_no). */
+export interface PickedQuestion {
+  id: string;
+  file_id: string;
+  topic_id: string | null;
+  boxes: BankBox[];
+}
+
+/** A bank the picks need: its label (folder path and name) for bank order, and a 60-second URL. */
+export interface PickedBank {
+  id: string;
+  name: string;
+  label: string;
+  size_bytes: number | null;
+  url: string;
+}
+
+/** `retry`: whether Try again can help, which it cannot for too many picks or a crafted call. */
+export type PrepareResult =
+  | { ok: true; questions: PickedQuestion[]; banks: PickedBank[]; missing: string[] }
+  | { ok: false; error: string; retry: boolean };
+
+/** One worksheet's picks at most: more would not fit the read's request line. */
+const MAX_PICKS = 200;
+// A pick as the app writes one: a question id as the database spells it.
+const PICK = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/**
+ * The picks the modal draws (§4.4), in one call: the picked questions of this
+ * course with their banks' files rows, and their boxes, read under the caller's
+ * session, and every bank they need signed in one createSignedUrls call. The
+ * files rows come from that read, under RLS, which is getViewUrl's rule. A pick
+ * that is gone (deleted, left with no box, its bank in Trash), of another
+ * course, or not a question id at all (a tab's storage edited by hand) comes
+ * back in `missing`, so the modal removes it. The boxes are a flat read of
+ * their own, as the page view's are (§3.5): a project's max rows caps an
+ * embedded list too, and a question cut short would print short with nothing
+ * said. Both reads go a range at a time, for the same reason.
+ */
+export async function preparePicks(courseId: string, ids: string[]): Promise<PrepareResult> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "You're signed out. Reload the page to sign in again.", retry: false };
+  if (typeof courseId !== "string" || !UUID.test(courseId)) return { ok: false, error: "Bad course.", retry: false };
+  // The tab's picks are strings (usePicks keeps only those); anything else is a crafted call.
+  if (!Array.isArray(ids) || ids.some((id) => typeof id !== "string")) {
+    return { ok: false, error: "Bad picks.", retry: false };
+  }
+  const all = Array.from(new Set(ids));
+  const wanted = all.filter((id) => PICK.test(id));
+  const bad = all.filter((id) => !PICK.test(id));
+  if (wanted.length > MAX_PICKS) {
+    return {
+      ok: false,
+      error: `A worksheet takes ${MAX_PICKS} questions at most, and ${wanted.length} are picked. Un-pick some on their banks' pages, or clear the picks with × and pick again.`,
+      retry: false,
+    };
+  }
+  if (!wanted.length) return { ok: true, questions: [], banks: [], missing: bad };
+
+  type Row = {
+    id: string;
+    file_id: string;
+    topic_id: string | null;
+    files: { name: string; folder_id: string | null; storage_path: string; size_bytes: number | null };
+  };
+  let rows: Row[];
+  let picked: BankQuestion[];
+  let folders: { id: string; parent_id: string | null; name: string }[];
+  try {
+    const [read, boxes, f] = await Promise.all([
+      readAllRows<Row>((from, to, count) =>
+        supabase
+          .from("questions")
+          .select(
+            "id, file_id, topic_id, files!inner(name, folder_id, storage_path, size_bytes, course_id)",
+            count ? { count: "exact" } : undefined,
+          )
+          .in("id", wanted)
+          .eq("files.course_id", courseId)
+          .order("id", { ascending: true })
+          .range(from, to)
+          // Without generated types the embed of a many-to-one reads as a list.
+          .overrideTypes<Row[], { merge: false }>(),
+      ),
+      readAllRows<BankBox & { question_id: string }>((from, to, count) =>
+        supabase
+          .from("question_boxes")
+          .select("id, question_id, box_no, page, x0, y0, x1, y1, pos", count ? { count: "exact" } : undefined)
+          .in("question_id", wanted)
+          .order("id", { ascending: true })
+          .range(from, to),
+      ),
+      supabase.from("folders").select("id, parent_id, name").eq("course_id", courseId).is("deleted_at", null),
+    ]);
+    if (f.error) throw new Error(f.error.message);
+    // The page view's reader: boxes in box_no order, and a question with no box
+    // dropped like a missing one, since the readers never rely on save_crops
+    // having kept every question's boxes (§3.2).
+    picked = bankOf(read, boxes);
+    const kept = new Set(picked.map((q) => q.id));
+    rows = read.filter((r) => kept.has(r.id));
+    folders = f.data ?? [];
+  } catch (err) {
+    console.error(`preparePicks in ${courseId}: ${(err as Error).message}`);
+    return { ok: false, error: "The picks could not be read. Try again.", retry: true };
+  }
+
+  const fileOf = new Map(rows.map((r) => [r.id, r.file_id]));
+  const missing = [...bad, ...wanted.filter((id) => !fileOf.has(id))];
+  const files = new Map(rows.map((r) => [r.file_id, r.files]));
+  // Every pick gone: nothing to sign, and Storage refuses an empty list.
+  if (!files.size) return { ok: true, questions: [], banks: [], missing };
+  const signed = await signBanks(Array.from(files.values(), (f) => f.storage_path));
+  if (!signed) return { ok: false, error: "The banks could not be signed for download. Try again.", retry: true };
+
+  const banks: PickedBank[] = [];
+  for (const [id, f] of files) {
+    const url = signed.get(f.storage_path);
+    if (!url) return { ok: false, error: `${f.name} could not be signed for download. Try again.`, retry: true };
+    banks.push({ id, name: f.name, label: bankPath(f.name, f.folder_id, folders), size_bytes: f.size_bytes, url });
+  }
+  return {
+    ok: true,
+    questions: picked.map((q) => ({ id: q.id, file_id: fileOf.get(q.id)!, topic_id: q.topic_id, boxes: q.boxes })),
+    banks,
+    missing,
+  };
+}
+
+/** Signed 60-second URLs, by storage path, for files the caller's session just read. */
+async function signBanks(paths: string[]): Promise<Map<string, string> | null> {
+  const { data, error } = await createServiceClient()
+    .storage.from("course-materials")
+    .createSignedUrls(paths, 60);
+  if (error || !data) return null;
+  return new Map(data.flatMap((d) => (d.path && d.signedUrl && !d.error ? [[d.path, d.signedUrl] as const] : [])));
 }

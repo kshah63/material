@@ -25,7 +25,6 @@ import {
   PlusIcon,
   SpinnerIcon,
   TrashIcon,
-  XIcon,
 } from "@/components/icons";
 import { usePicks } from "@/hooks/usePicks";
 import { formatBytes } from "@/lib/format";
@@ -71,7 +70,9 @@ import {
 } from "@/lib/worksheet/crops";
 import type { BankQuestion } from "@/lib/queries";
 import type { FileRow, QuestionTopic } from "@/lib/types";
+import { PicksBar } from "./PicksBar";
 import { Stage, type StageItem } from "./Stage";
+import { WorksheetModal } from "./WorksheetModal";
 
 // The page is drawn at the column's width in device pixels, up to the 2,048 px
 // §8.1 measured (20–86 ms for a digital page, about 0.5 s for a scan), and never
@@ -85,8 +86,9 @@ export interface PageViewProps {
   /** Whose picks these are: they are kept per person, as well as per course. */
   userId: string;
   courseId: string;
-  courseName: string;
-  file: Pick<FileRow, "id" | "name" | "size_bytes" | "folder_id" | "eff_teacher_only">;
+  /** The course's name and code: the back link's label and the worksheet's file name (§6.5). */
+  course: { name: string; code: string | null };
+  file: Pick<FileRow, "id" | "name" | "size_bytes" | "eff_teacher_only">;
   questions: BankQuestion[];
   topics: QuestionTopic[];
   /** can_crop_file's answer: crop for a manager it allows, pick for everyone else. */
@@ -94,6 +96,8 @@ export interface PageViewProps {
   /** in_charge or admin: sees every page and the crop-once hints. */
   manager: boolean;
   initialPage: number | null;
+  /** A topic to open with, from the Questions page's topic filter. */
+  initialTopic: string | null;
 }
 
 type PdfState =
@@ -123,13 +127,11 @@ const KIND: Record<PageKind, string> = {
  * a question's own box picks it for a worksheet.
  */
 export function PageView(props: PageViewProps) {
-  const { userId, courseId, courseName, file, questions, topics, mode, manager, initialPage } = props;
+  const { userId, courseId, course, file, questions, topics, mode, manager, initialPage, initialTopic } = props;
   const router = useRouter();
   const cropping = mode === "crop";
-  const backHref = file.folder_id
-    ? `/courses/${courseId}?folder=${file.folder_id}`
-    : `/courses/${courseId}`;
   const { picks, toggle: togglePick, clear: clearPicks } = usePicks(userId, courseId);
+  const [making, setMaking] = useState(false); // the worksheet modal is open
 
   // --- what is saved, and the screen on top of it --------------------------------
   const [saved, setSaved] = useState<BankQuestion[]>(questions);
@@ -224,7 +226,9 @@ export function PageView(props: PageViewProps) {
   }, [crops, numPages]);
 
   // --- pages ----------------------------------------------------------------------
-  const [topicId, setTopicId] = useState(""); // "" is Any topic
+  const [topicId, setTopicId] = useState(initialTopic ?? ""); // "" is Any topic
+  // Back to Questions with the topic in hand, so the next bank is found by it too.
+  const backHref = `/courses/${courseId}/questions${topicId ? `?topic=${topicId}` : ""}`;
   // Managers see every page; teachers only pages with a box. A topic narrows
   // either list to pages with a question of that topic.
   const pagesFor = useCallback(
@@ -447,18 +451,25 @@ export function PageView(props: PageViewProps) {
     startTransition(() => router.refresh());
   }
 
-  const goTo = (p: number, select: string | null = null) => {
+  // Keeps the page and the topic across a reload; Next's router follows replaceState.
+  const keepInUrl = (p: number | null, t: string) => {
+    const q = new URLSearchParams();
+    if (p !== null) q.set("page", String(p));
+    if (t) q.set("topic", t);
+    window.history.replaceState(null, "", `?${q}`);
+  };
+  const goTo = (p: number, select: string | null = null, topic = topicId) => {
     if (cropping) void save();
     setPageNo(p);
     // A selected stimulus stays in hand on the next page; anything else is let go.
     setSel(select ?? (sel !== null && sel === stim ? sel : null));
-    // Keeps the page across a reload; Next's router follows replaceState.
-    window.history.replaceState(null, "", `?page=${p}`);
+    keepInUrl(p, topic);
   };
   const onTopic = (t: string) => {
     setTopicId(t);
     const list = pagesFor(t);
-    if (page !== null && !list.includes(page) && list.length > 0) goTo(list[0]);
+    if (page !== null && !list.includes(page) && list.length > 0) goTo(list[0], null, t);
+    else keepInUrl(page, t);
   };
 
   // Leaving with changes not yet saved: the browser asks first.
@@ -596,6 +607,8 @@ export function PageView(props: PageViewProps) {
   }
 
   const onKey = useEffectEvent((e: KeyboardEvent) => {
+    // The worksheet modal is over the page: its keys are its own.
+    if (making) return;
     const t = e.target;
     if (t instanceof HTMLElement && (t.closest("input, select, textarea") || t.isContentEditable)) return;
     if (e.key === "Escape") {
@@ -753,7 +766,7 @@ export function PageView(props: PageViewProps) {
             }
           }}
         >
-          <ArrowLeftIcon width={16} height={16} /> {courseName}
+          <ArrowLeftIcon width={16} height={16} /> Questions
         </Link>
         <span className="truncate min-w-0" style={{ fontSize: 15, fontWeight: 800, flex: "1 1 160px" }}>
           {file.name}
@@ -1171,21 +1184,24 @@ export function PageView(props: PageViewProps) {
       </div>
 
       {/* The picks bar: a teacher's picks for this course, kept in the tab (§2.2). */}
-      {picks.length > 0 && (
-        <div
-          className="fixed left-1/2 card pop flex items-center gap-2"
-          style={{
-            bottom: 24,
-            transform: "translateX(-50%)",
-            padding: "8px 8px 8px 16px",
-            boxShadow: "var(--shadow-pop)",
-          }}
-        >
-          <span style={{ fontSize: 14, fontWeight: 800, whiteSpace: "nowrap" }}>{picks.length} picked</span>
-          <button className="btn btn-quiet btn-sm" onClick={clearPicks} aria-label="Clear picks">
-            <XIcon width={16} height={16} />
-          </button>
-        </div>
+      <PicksBar
+        count={picks.length}
+        onMake={async () => {
+          // What prints is what is saved, so a crop changed here is saved first.
+          if (cropping) await save();
+          setMaking(true);
+        }}
+        onClear={clearPicks}
+      />
+      {making && (
+        <WorksheetModal
+          userId={userId}
+          courseId={courseId}
+          course={course}
+          picks={picks}
+          topics={topics}
+          onClose={() => setMaking(false)}
+        />
       )}
     </div>
   );

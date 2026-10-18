@@ -1,8 +1,8 @@
 #!/bin/bash
 # Applies every migration to a scratch Postgres, the worksheet migration a second
 # time (to prove it can be run twice), then runs the SQL tests and, in Node, the
-# crop screen's save (crops.mjs). The scratch database is dropped however the
-# run ends.
+# crop screen's save (crops.mjs) and the worksheet's layout (worksheet.mjs). The
+# scratch database is dropped however the run ends.
 #   PGHOST=localhost PGUSER=postgres bash supabase/tests/run.sh
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -22,3 +22,6 @@ psql -q -v ON_ERROR_STOP=1 -d "$DB" -f questions.sql
 # The crop screen's save (lib/worksheet/crops.ts), built in Node and sent to the
 # real save_crops in the same scratch database.
 node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON crops.mjs "$DB"
+# The worksheet's layout (lib/worksheet/layout.ts) and its source line in
+# pdf-lib's Helvetica. It needs no database.
+node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON worksheet.mjs
