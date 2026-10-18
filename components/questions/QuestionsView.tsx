@@ -154,7 +154,7 @@ export function QuestionsView({
         </div>
       )}
 
-      <PicksBar count={picks.length} onMake={() => setMaking(true)} onClear={clear} />
+      <PicksBar count={picks.length} onMake={() => setMaking(true)} onClear={clear} canMake={manager} />
       {making && (
         <WorksheetModal
           userId={userId}

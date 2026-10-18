@@ -10,10 +10,13 @@ export function PicksBar({
   count,
   onMake,
   onClear,
+  canMake = true,
 }: {
   count: number;
   onMake: () => void;
   onClear: () => void;
+  // Worksheets are downloads, which are for admins and in-charges only.
+  canMake?: boolean;
 }) {
   if (count === 0) return null;
   return (
@@ -28,9 +31,13 @@ export function PicksBar({
     >
       <span style={{ fontSize: 14, fontWeight: 800, whiteSpace: "nowrap" }}>{count} picked</span>
       <span style={{ width: 1, height: 22, background: "var(--line)", margin: "0 4px" }} />
-      <button className="btn btn-primary btn-sm" style={{ whiteSpace: "nowrap" }} onClick={onMake}>
-        Make worksheet
-      </button>
+      {canMake ? (
+        <button className="btn btn-primary btn-sm" style={{ whiteSpace: "nowrap" }} onClick={onMake}>
+          Make worksheet
+        </button>
+      ) : (
+        <span style={{ fontSize: 13, color: "var(--ink-soft)" }}>Only in-charges and admins can make worksheets.</span>
+      )}
       <button className="btn btn-quiet btn-sm" onClick={onClear} aria-label="Clear picks">
         <XIcon width={16} height={16} />
       </button>

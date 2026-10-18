@@ -109,6 +109,15 @@ cannot use.
      in-charges, on every file they can open, teacher-only folders and mark
      schemes included (d71febe, merged). Students still only view. So a
      worksheet no longer relaxes anything for the teacher.
+   - *Reversed on 2026-10-18:* *"only one category of teachers (DD- global
+     online) can download (apart from in charges and admin) since they are
+     the ones taking online lessons"*, then for the portal *"just restrict for
+     everyone except in charges"*. Downloads and worksheets are for admins and
+     a course's in-charges again: `getViewUrl` gives teachers a view-only
+     preview, `preparePicks` refuses a worksheet to anyone else, and the
+     Questions page shows teachers no Make worksheet. The Global Online rule
+     is for when materials move into mv-app, whose staff profiles carry that
+     employment type.
    - *Settled after that:* a booklet, a finished paper or a worksheet goes
      into the child's Pencil Space with one page per board. *"Yes sure one
      page per board is good."* Page 12 of a booklet is then board 12, and the
