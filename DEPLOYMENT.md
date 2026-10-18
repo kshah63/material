@@ -54,6 +54,48 @@ table, and can be run twice. Apply it **before** deploying app code that reads
 it: Vercel deploys the app, never the database. Then add each bank-holding
 course's topics (step 8).
 
+First check that the editor is open on the materials portal's project, with
+everything the migration needs. Every column must read `t`; a `false` in
+`not_the_mv_app` means this is the lessons app's project:
+
+```sql
+select
+  to_regclass('public.session_requests') is null as not_the_mv_app,
+  to_regclass('public.courses') is not null
+    and to_regclass('public.profiles') is not null
+    and to_regclass('public.course_memberships') is not null as portal_tables,
+  (select count(*) = 4 from information_schema.columns
+    where table_schema = 'public' and table_name = 'files'
+      and column_name in ('course_id', 'deleted_at', 'eff_teacher_only', 'folder_id')) as files_columns,
+  to_regprocedure('public.is_admin()') is not null
+    and to_regprocedure('public.course_role(uuid)') is not null as portal_functions,
+  to_regprocedure('auth.uid()') is not null as supabase_auth;
+```
+
+After running the migration, this must also read `t` in every column:
+
+```sql
+select
+  (select count(*) = 3 from pg_class c join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'public' and c.relkind = 'r' and c.relrowsecurity
+      and c.relname in ('question_topics', 'questions', 'question_boxes')) as tables_with_rls,
+  (select count(*) = 4 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public'
+      and p.proname in ('can_crop_file', 'topic_fits', 'question_course_ids', 'save_crops')) as functions,
+  to_regclass('public.question_sources') is not null as sources_view,
+  case when to_regprocedure('public.save_crops(uuid, jsonb, jsonb, uuid[])') is null then false
+       else has_function_privilege('authenticated', 'public.save_crops(uuid, jsonb, jsonb, uuid[])', 'execute')
+        and not has_function_privilege('anon', 'public.save_crops(uuid, jsonb, jsonb, uuid[])', 'execute')
+  end as save_grants,
+  case when to_regclass('public.question_boxes') is null then false
+       else not has_table_privilege('anon', 'public.questions', 'select')
+        and not has_table_privilege('anon', 'public.question_boxes', 'select')
+  end as anon_locked_out;
+```
+
+If the paste stops on an error part-way, fix the cause and paste the whole file
+again: it is written to be run twice.
+
 > **Not `supabase db push` on a project set up by pasting.** Pasting SQL into
 > the editor (Option A, or the accounts migration above) records nothing in the
 > project's migration history, so a push replays every migration file first.
