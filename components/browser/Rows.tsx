@@ -12,6 +12,7 @@ import {
   MarkerIcon,
   EyeIcon,
   CheckIcon,
+  CropIcon,
 } from "@/components/icons";
 import { formatBytes, relativeTime } from "@/lib/format";
 import type { CourseCapabilities, FileRow, Folder } from "@/lib/types";
@@ -177,6 +178,7 @@ export function FileItemRow({
   selectionActive,
   caps,
   onOpen,
+  onCrop,
   onRename,
   onMove,
   onDelete,
@@ -188,6 +190,7 @@ export function FileItemRow({
   selectionActive: boolean;
   caps: CourseCapabilities;
   onOpen: () => void;
+  onCrop: () => void;
   onRename: () => void;
   onMove: () => void;
   onDelete: () => void;
@@ -195,6 +198,7 @@ export function FileItemRow({
 }) {
   const menuItems: (MenuItem | "divider")[] = [
     { label: "Open", icon: <EyeIcon width={17} height={17} />, onSelect: onOpen },
+    { label: "Crop questions", icon: <CropIcon width={17} height={17} />, onSelect: onCrop },
     { label: "Rename", icon: <RenameIcon width={17} height={17} />, onSelect: onRename },
     { label: "Move to…", icon: <MoveIcon width={17} height={17} />, onSelect: onMove },
     ...TeacherOnlyMenu(caps, file.teacher_only, onSetTeacherOnly),

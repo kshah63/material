@@ -24,8 +24,10 @@ deletes.
   the UI.
 - **Bulk & resumable uploads** — drop whole folders; large files resume on a
   dropped connection (TUS).
-- **Soft delete → Trash → 30-day purge.** Nobody can hard-delete; the only
-  physical delete is an automated service-role job.
+- **Soft delete → Trash → 30-day purge.** Nobody can hard-delete a file or a
+  folder; the only physical delete is an automated service-role job. A cropped
+  question and its boxes are only boxes on a bank's pages, so they are deleted
+  outright, with no Trash.
 
 ### Permission matrix (per course)
 
@@ -35,6 +37,8 @@ deletes.
 | View teacher-only material | — | ✓ | ✓ | ✓ |
 | Upload / create / rename / move / delete | — | — | ✓ | ✓ |
 | View Trash + restore | — | — | ✓ | ✓ |
+| Crop questions from a teacher-only bank | — | — | ✓ | ✓ |
+| Pick questions, download a worksheet | — | ✓ | ✓ | ✓ |
 | Manage members / courses / invites | — | — | — | ✓ |
 
 ---
@@ -70,8 +74,11 @@ lib/
   queries.ts              server-side reads (RLS-scoped)
   upload/                 folder-tree capture + TUS upload
 supabase/
-  migrations/             schema · functions · triggers · rls · storage
+  migrations/             schema · functions · triggers · rls · storage · questions
   schema.sql              all migrations concatenated (one-shot paste)
+  tests/run.sh            applies every migration to a scratch Postgres, runs the SQL tests
+  tests/crops.mjs         the crop screen's save (lib/worksheet/crops.ts) against the real save_crops
+  tests/worksheet.mjs     the worksheet's layout and source line (lib/worksheet/layout.ts)
   functions/purge/        Edge Function alternative to the cron route
 ```
 
@@ -84,7 +91,9 @@ supabase/
    cp .env.example .env.local
    ```
 2. Apply the database schema to your Supabase project (SQL editor → paste
-   `supabase/schema.sql`, or `supabase db push`). See DEPLOYMENT.md.
+   `supabase/schema.sql`). Read DEPLOYMENT.md §2 before using `supabase db
+   push`: on a project set up by pasting, a push approves every pending
+   signup.
 3. Run:
    ```bash
    npm install

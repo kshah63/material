@@ -8,7 +8,11 @@ import type {
   FileRow,
   Folder,
   Profile,
+  QuestionBox,
+  QuestionSource,
+  QuestionTopic,
 } from "./types";
+import { bankOf } from "./worksheet/crops";
 
 /** Courses the caller belongs to (admins see all), with the caller's role. */
 export async function getMyCourses(
@@ -281,4 +285,178 @@ export async function getTrash(courseId: string): Promise<TrashBatch[]> {
   return Array.from(batches.values()).sort((a, b) =>
     b.deletedAt.localeCompare(a.deletedAt),
   );
+}
+
+// Worksheet maker: the page view's reads (docs/WORKSHEETS.md §3.5, §4.3) -------
+
+/** One file by id under the caller's session: null if RLS hides it or it does not exist. */
+export async function getFile(fileId: string): Promise<FileRow | null> {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("files")
+    .select("*")
+    .eq("id", fileId)
+    .maybeSingle();
+  return data;
+}
+
+/** A course's fixed topic list, in the owner's order (§2.1 item 12). */
+export async function listTopics(courseId: string): Promise<QuestionTopic[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("question_topics")
+    .select("id, course_id, name, position")
+    .eq("course_id", courseId)
+    .order("position", { ascending: true })
+    .order("name", { ascending: true });
+  if (error) throw new Error(`Could not read the course's topics: ${error.message}`);
+  return data ?? [];
+}
+
+/** Whether the caller may crop this file: the database's one rule (§3.2), never a copy. */
+export async function canCropFile(fileId: string): Promise<boolean> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("can_crop_file", { _file_id: fileId });
+  if (error) throw new Error(`Could not ask whether this file can be cropped: ${error.message}`);
+  return data === true;
+}
+
+/** A saved box as the page view reads it. Corners are PDF user-space points; y grows upwards. */
+export type BankBox = Pick<
+  QuestionBox,
+  "id" | "box_no" | "page" | "x0" | "y0" | "x1" | "y1" | "pos"
+>;
+
+/** A question of one bank, with its boxes in print order (box_no). Never without a box. */
+export interface BankQuestion {
+  id: string;
+  topic_id: string | null;
+  boxes: BankBox[];
+}
+
+// The API returns at most the project's max rows per request (1,000 by default).
+const RANGE = 1000;
+
+/**
+ * Every row of one read, a range at a time, until it has as many as the first
+ * range's exact count. Each range starts where the rows read so far end, so a
+ * project whose max rows is under RANGE still reads them all. A save landing
+ * between two ranges can repeat or skip a row; repeats are dropped by id, and an
+ * edit built on a list that skipped a box is refused by save_crops (§3.4 step 3).
+ */
+export async function readAllRows<T extends { id: string }>(
+  range: (
+    from: number,
+    to: number,
+    count: boolean,
+  ) => PromiseLike<{ data: T[] | null; count: number | null; error: { message: string } | null }>,
+): Promise<T[]> {
+  const byId = new Map<string, T>();
+  let read = 0;
+  let total: number | null = null;
+  do {
+    const { data, count, error } = await range(read, read + RANGE - 1, total === null);
+    if (error) throw new Error(error.message);
+    // Without a count, read until a range comes back empty.
+    if (total === null) total = count ?? Number.POSITIVE_INFINITY;
+    if (!data || data.length === 0) break;
+    read += data.length;
+    for (const row of data) byId.set(row.id, row);
+  } while (read < total);
+  return Array.from(byId.values());
+}
+
+/**
+ * One bank's questions with their boxes (§3.5), RLS-scoped: two flat reads, never
+ * an embed, because an embed runs the inner table's policy once per row. The two
+ * reads are separate snapshots, so a question is kept only when both its row and
+ * at least one of its boxes were read, and a box only when its question was.
+ * A box on a page past the PDF's last page is the page view's to drop: only it
+ * knows the page count. Throws on a failed read, because an empty bank shown in
+ * its place would be cropped a second time.
+ */
+export async function listFileQuestions(fileId: string): Promise<BankQuestion[]> {
+  const supabase = await createClient();
+  const [boxes, questions] = await Promise.all([
+    readAllRows<BankBox & { question_id: string }>((from, to, count) =>
+      supabase
+        .from("question_boxes")
+        .select(
+          "id, question_id, box_no, page, x0, y0, x1, y1, pos",
+          count ? { count: "exact" } : undefined,
+        )
+        .eq("file_id", fileId)
+        .order("page", { ascending: true })
+        .order("pos", { ascending: true })
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
+    readAllRows<{ id: string; topic_id: string | null }>((from, to, count) =>
+      supabase
+        .from("questions")
+        .select("id, topic_id", count ? { count: "exact" } : undefined)
+        .eq("file_id", fileId)
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
+  ]).catch((err: Error) => {
+    throw new Error(`Could not read this bank's questions: ${err.message}`);
+  });
+
+  // A question's place is its first box by box_no, whatever that number is: the
+  // readers never look for box_no = 1 (§3.2).
+  return bankOf(questions, boxes);
+}
+
+// Worksheet maker: the Questions page's reads (docs/WORKSHEETS.md §3.5, §4.2) ----
+
+/**
+ * The course's cropped banks, one row each (question_sources), RLS-scoped: a bank
+ * in Trash has no boxes anyone can read, so it is not listed. No limit: the
+ * course's files bound it. Read a range at a time all the same, by file id, so a
+ * project's max rows never ends the list early.
+ */
+export async function listQuestionSources(courseId: string): Promise<QuestionSource[]> {
+  const supabase = await createClient();
+  const rows = await readAllRows<QuestionSource & { id: string }>((from, to, count) =>
+    supabase
+      .from("question_sources")
+      // The file id once more as `id`, which readAllRows keeps one row of each by.
+      .select(
+        "id:file_id, course_id, file_id, file_name, folder_id, eff_teacher_only, questions, pages, first_page",
+        count ? { count: "exact" } : undefined,
+      )
+      .eq("course_id", courseId)
+      .order("file_id", { ascending: true })
+      .range(from, to),
+  ).catch((err: Error) => {
+    throw new Error(`Could not read the course's cropped banks: ${err.message}`);
+  });
+  return rows;
+}
+
+/**
+ * How many questions of each of these banks have the topic, for the Questions
+ * page's topic filter: the topic's rows a range at a time, counted by bank.
+ */
+export async function countTopicQuestions(
+  topicId: string,
+  fileIds: string[],
+): Promise<Map<string, number>> {
+  const counts = new Map<string, number>();
+  if (!fileIds.length) return counts;
+  const supabase = await createClient();
+  const rows = await readAllRows<{ id: string; file_id: string }>((from, to, count) =>
+    supabase
+      .from("questions")
+      .select("id, file_id", count ? { count: "exact" } : undefined)
+      .eq("topic_id", topicId)
+      .in("file_id", fileIds)
+      .order("id", { ascending: true })
+      .range(from, to),
+  ).catch((err: Error) => {
+    throw new Error(`Could not count the topic's questions: ${err.message}`);
+  });
+  for (const r of rows) counts.set(r.file_id, (counts.get(r.file_id) ?? 0) + 1);
+  return counts;
 }

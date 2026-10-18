@@ -37,14 +37,81 @@ supabase db push          # applies supabase/migrations/* in order
 ```
 
 Verify: **Table editor** shows `profiles`, `courses`, `course_memberships`,
-`enrollment_requests`, `folders`, `files`; **Storage** shows a private
-`course-materials` bucket.
+`enrollment_requests`, `folders`, `files`, `question_topics`, `questions`,
+`question_boxes`; **Storage** shows a private `course-materials` bucket.
 
-**Already deployed before accounts & enrollment existed?** Run just the newest
+**Already deployed before accounts & enrollment existed?** Run just that
 migration —
 [`supabase/migrations/20260612000006_accounts_enrollment.sql`](./supabase/migrations/20260612000006_accounts_enrollment.sql)
 — in the SQL editor. It's idempotent and backfills every existing profile as
 `approved`.
+
+**Already deployed before the worksheet maker?** Run just
+[`supabase/migrations/20261017000009_questions.sql`](./supabase/migrations/20261017000009_questions.sql)
+— paste it into the SQL editor. It adds the three question tables, their
+policies, `save_crops` and the `question_sources` view, changes no existing
+table, and can be run twice. Apply it **before** deploying app code that reads
+it: Vercel deploys the app, never the database. Then add each bank-holding
+course's topics (step 8).
+
+First check that the editor is open on the materials portal's project, with
+everything the migration needs. Every column must read `t`; a `false` in
+`not_the_mv_app` means this is the lessons app's project:
+
+```sql
+select
+  to_regclass('public.session_requests') is null as not_the_mv_app,
+  to_regclass('public.courses') is not null
+    and to_regclass('public.profiles') is not null
+    and to_regclass('public.course_memberships') is not null as portal_tables,
+  (select count(*) = 4 from information_schema.columns
+    where table_schema = 'public' and table_name = 'files'
+      and column_name in ('course_id', 'deleted_at', 'eff_teacher_only', 'folder_id')) as files_columns,
+  to_regprocedure('public.is_admin()') is not null
+    and to_regprocedure('public.course_role(uuid)') is not null as portal_functions,
+  to_regprocedure('auth.uid()') is not null as supabase_auth;
+```
+
+After running the migration, this must also read `t` in every column:
+
+```sql
+select
+  (select count(*) = 3 from pg_class c join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'public' and c.relkind = 'r' and c.relrowsecurity
+      and c.relname in ('question_topics', 'questions', 'question_boxes')) as tables_with_rls,
+  (select count(*) = 4 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public'
+      and p.proname in ('can_crop_file', 'topic_fits', 'question_course_ids', 'save_crops')) as functions,
+  to_regclass('public.question_sources') is not null as sources_view,
+  case when to_regprocedure('public.save_crops(uuid, jsonb, jsonb, uuid[])') is null then false
+       else has_function_privilege('authenticated', 'public.save_crops(uuid, jsonb, jsonb, uuid[])', 'execute')
+        and not has_function_privilege('anon', 'public.save_crops(uuid, jsonb, jsonb, uuid[])', 'execute')
+  end as save_grants,
+  case when to_regclass('public.question_boxes') is null then false
+       else not has_table_privilege('anon', 'public.questions', 'select')
+        and not has_table_privilege('anon', 'public.question_boxes', 'select')
+  end as anon_locked_out;
+```
+
+If the paste stops on an error part-way, fix the cause and paste the whole file
+again: it is written to be run twice.
+
+> **Not `supabase db push` on a project set up by pasting.** Pasting SQL into
+> the editor (Option A, or the accounts migration above) records nothing in the
+> project's migration history, so a push replays every migration file first.
+> They all re-run cleanly, but `20260612000006` contains
+> `update public.profiles set status = 'approved' where status = 'pending'`:
+> every signup waiting for approval is approved, with no error. Push only when
+> `supabase migration list` shows `20260611000001` to `20260612000008` as
+> applied on the remote. To get there from a pasted project, run
+> `supabase migration repair --status applied 20260611000001 20260611000002 20260611000003 20260611000004 20260611000005 20260612000006 20260612000007 20260612000008`
+> first.
+
+To check a migration locally first: `PGHOST=localhost PGUSER=postgres bash
+supabase/tests/run.sh` applies every migration to a scratch Postgres 16 and
+runs the SQL tests. It needs `psql`, a local Postgres 16, Node 22.18 or newer
+and `npm install`: its last two steps run in Node, which imports the app's
+TypeScript directly and reads `pdf-lib` from `node_modules`.
 
 ---
 
@@ -195,6 +262,36 @@ chunks, cancel).
 
 ---
 
+## 8. Question topics (worksheet maker)
+
+Each bank-holding course has one fixed topic list, in the owner's order. There
+is no topic screen and the migration adds none, so re-running it never brings a
+deleted topic back. Once the course exists, run this in the SQL editor with its
+code and the owner's list:
+
+```sql
+insert into public.question_topics (course_id, name, position)
+select c.id, t.name, t.position
+from public.courses c,
+     (values ('Fractions', 1), ('Decimals', 2), ('Percentages', 3)) as t(name, position)
+where c.code = 'IM2'   -- or c.id = '<course id>' for a course with no code
+on conflict (course_id, name) do update set position = excluded.position
+returning name, position;
+```
+
+- The result lists the topics written. **An empty result means the code
+  matched no course.**
+- Each name appears once in the list; a name listed twice fails the whole
+  statement with "cannot affect row a second time", and nothing is written.
+- Running it again with the same list changes nothing; a reordered list moves
+  the topics.
+- A renamed topic would be added as a new one. Rename it in place instead:
+  `update public.question_topics set name = '…' where id = '…';`
+- Deleting a topic (`delete from public.question_topics where id = '…';`) keeps
+  its questions and leaves them with no topic.
+
+---
+
 ## Troubleshooting
 
 - **Invite emails don't arrive.** You're hitting Supabase's built-in email limits
@@ -206,4 +303,16 @@ chunks, cancel).
   `courses/{course_id}/{file_id}.pdf`.
 - **A student can't see a file you expect.** Check the item (or an ancestor
   folder) isn't marked teacher-only — the butter-yellow highlight flags it.
+- **A bank says "This site's PDF reader is incomplete".** pdf.js's wasm, fonts,
+  CMaps and ICC profiles are copied into `public/pdfjs/` by the `postinstall`
+  script (`scripts/copy-pdfjs-assets.mjs`), and are not in git. An install run
+  with `--ignore-scripts` skips it; redeploy with a plain `npm install`. The
+  same card shows when the files are there but the browser cannot fetch
+  `/pdfjs/wasm/`, for example through a school filter or proxy that blocks
+  `.wasm` files. Without them a scanned page would draw blank, so the page view
+  refuses to open a bank until they can be fetched.
+- **Make worksheet says "the homework template answered 404".** The two
+  worksheet templates are in git, under `public/worksheet/`, and are served as
+  they are; a deploy that left `public/` out, or a filter blocking
+  `/worksheet/`, stops every worksheet.
 ```
