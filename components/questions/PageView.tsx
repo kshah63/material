@@ -1,9 +1,11 @@
 "use client";
 
 import {
+  memo,
   useCallback,
   useEffect,
   useEffectEvent,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -17,7 +19,7 @@ import type {
   RenderTask,
 } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { getViewUrl } from "@/app/actions/files";
-import { savePage, type SaveFailure, type SaveResult } from "@/app/actions/questions";
+import { savePage, type SaveChanges, type SaveFailure, type SaveResult } from "@/app/actions/questions";
 import {
   ArrowLeftIcon,
   CheckIcon,
@@ -39,6 +41,7 @@ import {
   suggestionsFor,
   toPdfBox,
   toViewRect,
+  type PdfBox,
   type ViewRect,
 } from "@/lib/worksheet/source";
 import type { FileSuggestions, PageKind, QuestionRef } from "@/lib/worksheet/propose";
@@ -47,6 +50,7 @@ import {
   MAX_BOXES,
   acceptOffers,
   addBox,
+  chunks,
   continuesAt,
   addQuestion,
   canAddBox,
@@ -56,7 +60,7 @@ import {
   draftRects,
   duplicates,
   fromBank,
-  isEmpty,
+  iou,
   isStimulus,
   makeStimulus,
   moveRect,
@@ -69,22 +73,31 @@ import {
   uncropped,
   unsaved,
   usersOf,
+  type Accepting,
   type CropQuestion,
+  type CropRect,
   type Crops,
   type Offer,
   type PageGeometry,
 } from "@/lib/worksheet/crops";
+import { acceptAll, offeredIn, toLookAt, undoAdded, type AcceptAll, type Added } from "@/lib/worksheet/review";
+import {
+  chooseTopic,
+  sectionOfBox,
+  sectionRows,
+  sectionsFor,
+  type Choice,
+  type Start,
+} from "@/lib/worksheet/sections";
 import type { BankQuestion } from "@/lib/queries";
 import type { FileRow, QuestionTopic } from "@/lib/types";
+import { BookView, canvasScale } from "./BookView";
+import { CheckPanel, type CheckChoice } from "./CheckPanel";
 import { PicksBar } from "./PicksBar";
+import { SectionsRail } from "./SectionsRail";
 import { Stage, type StageItem } from "./Stage";
 import { WorksheetModal } from "./WorksheetModal";
 
-// The page is drawn at the column's width in device pixels, up to the 2,048 px
-// §8.1 measured (20–86 ms for a digital page, about 0.5 s for a scan), and never
-// past iOS Safari's canvas area, beyond which a canvas silently draws nothing.
-const MAX_CANVAS_WIDTH = 2048;
-const MAX_CANVAS_AREA = 16_000_000;
 const COLUMN_MAX = 1100; // the Viewer's width
 const BIG_BANK = 10 * 1024 * 1024;
 
@@ -101,6 +114,7 @@ export interface PageViewProps {
   mode: "crop" | "pick";
   /** in_charge or admin: sees every page and the crop-once hints. */
   manager: boolean;
+  /** ?page=: the page to open, in One page. Cropping without it opens All pages. */
   initialPage: number | null;
   /** A topic to open with, from the Questions page's topic filter. */
   initialTopic: string | null;
@@ -111,12 +125,61 @@ type PdfState =
   | { status: "error"; message: string; retry: boolean }
   | { status: "ready"; doc: PDFDocumentProxy };
 
+/** The screen as a save left it: the bank read back, and the screen rebased on it. */
+type Kept = { saved: BankQuestion[]; crops: Crops };
+
+/** What Undo takes back, until the next action: the last Accept all, or the last section's topic. */
+type Undo =
+  | { kind: "accept"; label: string; added: Added; counts: AcceptAll["counts"] }
+  | { kind: "topics"; label: string; topics: [string, string | null][]; picks: ReadonlyMap<string, Choice> };
+
 const geometryOf = (viewports: Map<number, PageViewport>) =>
   new Map<number, PageGeometry>(
     Array.from(viewports, ([p, vp]) => [p, { width: vp.width, view: (b) => toViewRect(vp, b) }]),
   );
 
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
+
+/** Two overlay items that draw the same: their numbers, flags and words, and the same "?" list. */
+function sameItem(a: StageItem, b: StageItem): boolean {
+  const keys = Object.keys(a) as (keyof StageItem)[];
+  if (keys.length !== Object.keys(b).length) return false;
+  return keys.every((k) =>
+    k === "v" ? a.v.x === b.v.x && a.v.y === b.v.y && a.v.w === b.v.w && a.v.h === b.v.h : a[k] === b[k],
+  );
+}
+
+/**
+ * A page's overlay in All pages, drawn again only when what it shows changes:
+ * every page of the bank has one, and the page view renders on every page the
+ * scroll passes. Its handlers are not compared: each calls the page view's
+ * latest by ref (PageView's `on`), so an overlay left as it was never acts on
+ * an older screen.
+ */
+const BookStage = memo(
+  Stage,
+  (a, b) =>
+    a.width === b.width &&
+    a.height === b.height &&
+    a.pxPerUnit === b.pxPerUnit &&
+    a.selected === b.selected &&
+    a.mode === b.mode &&
+    a.scroller === b.scroller &&
+    a.items.length === b.items.length &&
+    a.items.every((it, i) => sameItem(it, b.items[i])),
+);
+
+/** A new id for accepting or drawing: a question's (a uuid, as save_crops takes it) or a rectangle's. */
+const newId = (what: "question" | "rect") => (what === "question" ? crypto.randomUUID() : `n:${crypto.randomUUID()}`);
+
+/** What Accept all did, in words: "67 questions, 17 continuations joined". */
+function acceptedWords(c: AcceptAll["counts"]): string {
+  const said: string[] = [];
+  if (c.questions) said.push(plural(c.questions, "question"));
+  if (c.stimuli) said.push(`${c.stimuli} ${c.stimuli === 1 ? "stimulus" : "stimuli"} put above their questions`);
+  if (c.continuations) said.push(`${plural(c.continuations, "continuation")} joined`);
+  return said.join(", ");
+}
 
 /** Question numbers as runs: "5–7, 9". */
 function numbers(refs: readonly QuestionRef[]): string {
@@ -159,9 +222,13 @@ const KIND: Record<PageKind, string> = {
 /**
  * The page view (docs/WORKSHEETS.md §4.3). In crop mode an in-charge draws,
  * moves, resizes and deletes boxes, builds questions of up to four boxes and
- * puts a stimulus above several of them; the screen saves the bank, in one
- * save_crops call, whenever they leave a page. Everyone else picks: a click on
- * a question's own box picks it for a worksheet.
+ * puts a stimulus above several of them, on every page of the bank in one
+ * scroll (All pages, where Accept all takes the whole bank's suggestions at
+ * once) or one page at a time (One page, ?page=). The screen saves the bank in
+ * save_crops calls: when they leave a page (or, in All pages, once the pages
+ * they changed are out of view), and at once for Accept all, a section's topic
+ * and Undo. Everyone else picks, one page at a time: a click on a question's
+ * own box picks it for a worksheet.
  */
 export function PageView(props: PageViewProps) {
   const { userId, courseId, course, file, questions, topics, mode, manager, initialPage, initialTopic } = props;
@@ -180,9 +247,35 @@ export function PageView(props: PageViewProps) {
   const [notice, setNotice] = useState<string | null>(null); // what an accept did, until the next edit
   const [newTopic, setNewTopic] = useState(""); // "" is No topic
   const [saving, setSaving] = useState(false);
+  // A save sent in parts (crops.ts chunks): how far it has got.
+  const [progress, setProgress] = useState<{ done: number; of: number } | null>(null);
   const [failure, setFailure] = useState<SaveFailure | null>(null);
+  // A save in parts that stopped part-way: the parts before were saved, and these
+  // are sent again as they are. Until then the screen is not edited.
+  const [remaining, setRemaining] = useState<{ base: BankQuestion[]; target: Crops; parts: SaveChanges[] } | null>(
+    null,
+  );
   const [reloading, setReloading] = useState(false);
   const [, startTransition] = useTransition();
+
+  // All pages (crop mode without ?page=) or One page (?page=, and pick mode).
+  const [view, setView] = useState<"book" | "page">(cropping && initialPage === null ? "book" : "page");
+  const book = cropping && view === "book";
+  const [undo, setUndo] = useState<Undo | null>(null);
+  // The suggestion Next to check is showing, or null when its panel is closed.
+  const [checking, setChecking] = useState<string | null>(null);
+  // Topics chosen for sections with no question yet, which their questions take when accepted or drawn.
+  const [sectionPicks, setSectionPicks] = useState<ReadonlyMap<string, Choice>>(() => new Map());
+  // Sections started on this screen (New section here), where the finder read no heading.
+  const [starts, setStarts] = useState<readonly Start[]>([]);
+  const [drawer, setDrawer] = useState(false); // the sections drawer, on a narrow screen
+  // Draws, moves and resizes in progress on All pages' pages (Stage's onGesture).
+  const [gestures, setGestures] = useState(0);
+  // The Sections button, the drawer it opens, and the toolbar's Accept all and Undo, for the keyboard's focus.
+  const sectionsButton = useRef<HTMLButtonElement>(null);
+  const drawerRef = useRef<HTMLElement>(null);
+  const acceptButton = useRef<HTMLButtonElement>(null);
+  const undoButton = useRef<HTMLButtonElement>(null);
 
   // Reload page reads the route again; its bank replaces the screen, and what
   // was not saved is dropped. Any other new read leaves the screen alone.
@@ -199,6 +292,9 @@ export function PageView(props: PageViewProps) {
       setAsking(null);
       setNotice(null);
       setFailure(null);
+      setRemaining(null);
+      setUndo(null);
+      setChecking(null);
     }
   }
 
@@ -241,12 +337,51 @@ export function PageView(props: PageViewProps) {
   const doc = pdf.status === "ready" ? pdf.doc : null;
   const numPages = doc?.numPages ?? 0;
 
+  // Every page drawn so far, or sized, as displayed, for the reading order of a save.
+  const viewports = useRef(new Map<number, PageViewport>());
+
+  // Every page's size, read once the bank opens in crop mode: All pages gives
+  // each page its height from the start, and a save sets the reading order of a
+  // changed page from it even if the page was never drawn (crops.ts diff).
+  const [sizes, setSizes] = useState<{ doc: PDFDocumentProxy; list: PageViewport[] | null } | null>(null);
+  useEffect(() => {
+    if (!cropping || !doc) return;
+    let cancelled = false;
+    Promise.all(
+      Array.from({ length: doc.numPages }, (_, i) => doc.getPage(i + 1).then((p) => p.getViewport({ scale: 1 }))),
+    ).then(
+      (list) => {
+        if (cancelled) return;
+        list.forEach((vp, i) => viewports.current.set(i + 1, vp));
+        setSizes({ doc, list });
+      },
+      () => {
+        if (!cancelled) setSizes({ doc, list: null });
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [cropping, doc]);
+  // undefined while they are read; null if a page could not be read.
+  const pageSizes = sizes !== null && sizes.doc === doc ? sizes.list : undefined;
+
   // --- what is drawn ------------------------------------------------------------
   const users = useMemo(() => usersOf(crops), [crops]);
   const dupes = useMemo(() => duplicates(crops, users), [crops, users]);
   const drafts = useMemo(() => draftRects(saved, crops, users), [saved, crops, users]);
   const pending = useMemo(() => unsaved(saved, crops), [saved, crops]);
   const byId = useMemo(() => new Map(crops.questions.map((q) => [q.id, q])), [crops]);
+  // Every rectangle by its page, for each page's overlay.
+  const rectsOn = useMemo(() => {
+    const m = new Map<number, CropRect[]>();
+    for (const r of Object.values(crops.rects)) {
+      const list = m.get(r.page);
+      if (list) list.push(r);
+      else m.set(r.page, [r]);
+    }
+    return m;
+  }, [crops]);
   const savedIds = useMemo(() => new Set(saved.map((q) => q.id)), [saved]);
   const topicName = useMemo(() => new Map(topics.map((t) => [t.id, t.name])), [topics]);
   // The questions with a box on each page. A box on a page past the bank's last
@@ -345,11 +480,9 @@ export function PageView(props: PageViewProps) {
   const [renderError, setRenderError] = useState<string | null>(null);
   // The page drawn last, if an image on it did not decode (§8.3).
   const [undrawn, setUndrawn] = useState<number | null>(null);
-  // Every page drawn so far, as displayed, for the reading order of a save.
-  const viewports = useRef(new Map<number, PageViewport>());
 
   useEffect(() => {
-    if (!doc || page === null || width === 0) return;
+    if (book || !doc || page === null || width === 0) return;
     let cancelled = false;
     let task: RenderTask | null = null;
     // Drawn off screen and swapped in, so the old page stays up meanwhile.
@@ -358,9 +491,7 @@ export function PageView(props: PageViewProps) {
       const p = await doc.getPage(page);
       if (cancelled) return;
       const vp = p.getViewport({ scale: 1 });
-      const px = Math.min(MAX_CANVAS_WIDTH, Math.round(width * (window.devicePixelRatio || 1)));
-      const scale = Math.min(px / vp.width, Math.sqrt(MAX_CANVAS_AREA / (vp.width * vp.height)));
-      task = renderRegion(p, pageBox(p), scale, canvas);
+      task = renderRegion(p, pageBox(p), canvasScale(vp, width), canvas);
       await task.promise;
       // Asked at once: cleaning the page up forgets its images.
       const failed = imagesFailed(p);
@@ -384,20 +515,47 @@ export function PageView(props: PageViewProps) {
       task?.cancel();
       if (!canvas.isConnected) canvas.width = canvas.height = 0;
     };
-  }, [doc, page, width]);
+  }, [book, doc, page, width]);
 
   // Leaving a page frees what pdf.js decoded for it. Without this it keeps every
   // page for the life of the bank: 1.2 GB after 40 pages of a 300 ppi scan
   // (§4.5). pdf.js defers it until a render still running on the page stops.
+  // All pages does the same for each page it lets go (BookView).
   useEffect(() => {
-    if (!doc || page === null) return;
+    if (book || !doc || page === null) return;
     return () => {
       void doc
         .getPage(page)
         .then((p) => p.cleanup())
         .catch(() => {});
     };
-  }, [doc, page]);
+  }, [book, doc, page]);
+
+  // --- All pages ------------------------------------------------------------------
+  // The sections drawer is a dialog: focus goes into it, and back to the
+  // Sections button when it closes; what is behind it is inert meanwhile. A
+  // window widened past the rail's width closes it, since it is not shown there.
+  const drawerOpen = book && drawer && topics.length > 0;
+  useEffect(() => {
+    if (!drawerOpen) return;
+    drawerRef.current?.querySelector<HTMLElement>("button, select")?.focus();
+    const opener = sectionsButton.current;
+    const wide = window.matchMedia("(min-width: 1100px)");
+    const close = () => {
+      if (wide.matches) setDrawer(false);
+    };
+    wide.addEventListener("change", close);
+    return () => {
+      wide.removeEventListener("change", close);
+      if (opener?.isConnected) opener.focus();
+    };
+  }, [drawerOpen]);
+
+  const [visible, setVisible] = useState<ReadonlySet<number>>(() => new Set());
+  // The page a third of the way down the window: the header's page select.
+  const [bookPage, setBookPage] = useState(initialPage ?? 1);
+  // Pages drawn in All pages: the first one starts the suggestions, as a page drawn in One page does.
+  const [drawnCount, setDrawnCount] = useState(0);
 
   // --- suggestions (§5.1) --------------------------------------------------------
   // In crop mode, once a page is drawn, the bank is read for its text-layer
@@ -412,7 +570,7 @@ export function PageView(props: PageViewProps) {
   >(null);
   const [reading, setReading] = useState<{ done: number; pages: number } | null>(null);
   useEffect(() => {
-    if (!cropping || !doc || shownPage === null) return;
+    if (!cropping || !doc || (shownPage === null && drawnCount === 0)) return;
     let cancelled = false;
     // Asked again on every page: the bank is read once, and a failed read is tried again.
     suggestionsFor(doc, (done, pages) => {
@@ -428,7 +586,7 @@ export function PageView(props: PageViewProps) {
     return () => {
       cancelled = true;
     };
-  }, [cropping, doc, shownPage]);
+  }, [cropping, doc, shownPage, drawnCount]);
   const forDoc = suggested !== null && suggested.doc === doc ? suggested : null;
   const bankFound = forDoc && "found" in forDoc ? forDoc.found : null;
   const found = bankFound && shownPage !== null ? (bankFound.pages[shownPage - 1] ?? null) : null;
@@ -453,6 +611,57 @@ export function PageView(props: PageViewProps) {
     [bankFound],
   );
 
+  // --- the whole bank's suggestions, for All pages -----------------------------------
+  const geometry = useMemo(
+    () => (pageSizes ? geometryOf(new Map(pageSizes.map((vp, i) => [i + 1, vp]))) : null),
+    [pageSizes],
+  );
+  // Every suggestion still offered, in bank order.
+  const bankOffers = useMemo(
+    () => (book && bankFound ? offeredIn(crops, bankFound.pages, skipped) : []),
+    [book, bankFound, crops, skipped],
+  );
+  const offersByPage = useMemo(() => {
+    const m = new Map<number, Offer[]>();
+    for (const s of bankOffers) {
+      const list = m.get(s.page);
+      if (list) list.push(s);
+      else m.set(s.page, [s]);
+    }
+    return m;
+  }, [bankOffers]);
+  // Accept all as it would run now, for its count and for what it leaves to
+  // check. Its ids are never saved: the button runs it again.
+  const plan = useMemo(() => {
+    if (!book || !bankFound) return null;
+    let k = 0;
+    return acceptAll(crops, bankFound.pages, bankOffers, {
+      topic: null,
+      stim: null,
+      newId: (what) => `${what}:${++k}`,
+    });
+  }, [book, bankFound, crops, bankOffers]);
+  const toCheck = useMemo(() => plan?.rest ?? [], [plan]);
+  const checkingOffer = checking !== null ? (bankOffers.find((s) => s.id === checking) ?? null) : null;
+  // The sections and their topics, while the course has topics to give.
+  const sections = useMemo(
+    () =>
+      book && topics.length > 0 && bankFound && geometry ? sectionsFor(crops, bankFound.pages, geometry, starts) : null,
+    [book, topics.length, bankFound, geometry, crops, starts],
+  );
+  const rows = useMemo(
+    () => (sections ? sectionRows(sections, crops, sectionPicks) : []),
+    [sections, crops, sectionPicks],
+  );
+  /** The topic a new question takes in All pages: its section's, found by its suggestion or its box. */
+  function sectionTopic(page: number, box: PdfBox, offer?: Offer): string | null {
+    if (!sections || !bankFound || !geometry) return null;
+    const k =
+      (offer?.type === "question" ? sections.ofOffer.get(offer.id) : undefined) ??
+      sectionOfBox(sections, bankFound.pages, geometry, page, box);
+    return k >= 0 ? (rows[k]?.topic ?? null) : null;
+  }
+
   /**
    * Try again, for a bank that did not open or a page whose images did not
    * decode: the bank is closed and opened again, in a new pdf.js worker, which
@@ -474,43 +683,53 @@ export function PageView(props: PageViewProps) {
   }, []);
 
   // --- saving -------------------------------------------------------------------
-  const editable =
-    cropping &&
-    !saving &&
-    !reloading &&
-    failure?.kind !== "reload" &&
-    shown !== null &&
-    shown.page === page;
-  const inflight = useRef<Promise<boolean> | null>(null);
+  // Whether the screen can be edited at all, and, in One page, whether its page is drawn.
+  const canEdit = cropping && !saving && !reloading && failure?.kind !== "reload" && remaining === null;
+  const editable = canEdit && (book || (shown !== null && shown.page === page));
+  const inflight = useRef<Promise<Kept | null> | null>(null);
 
   /**
-   * Saves every change since the bank was read, on any page, in one save_crops
-   * call (§4.3), then shows the bank as read back. Edits wait while it runs.
-   * A refused save wrote nothing: the screen keeps its changes and says why.
+   * Saves `target` over `base`, the bank as read: every change since, on any
+   * page, in one save_crops call, or in as few as fit crops.ts's limits when
+   * there are many (Accept all on a long bank), then shows the bank as read
+   * back. Edits wait while it runs. A refused save wrote nothing: the screen
+   * keeps its changes and says why. A save in parts that is refused part-way
+   * has saved the parts before; the rest are sent again, as they are, by Try
+   * again or the next save. `parts` sends those instead of a new diff.
    */
-  function save(): Promise<boolean> {
+  function persist(base: BankQuestion[], target: Crops, parts: SaveChanges[] | null = null): Promise<Kept | null> {
     if (inflight.current) return inflight.current;
-    if (!cropping || reloading || failure?.kind === "reload") return Promise.resolve(false);
-    const changes = diff(saved, crops, geometryOf(viewports.current));
-    if (isEmpty(changes)) return Promise.resolve(true);
-    const before = crops;
-    const run = (async () => {
+    if (!cropping || reloading || failure?.kind === "reload") return Promise.resolve(null);
+    const todo = parts ?? chunks(base, diff(base, target, geometryOf(viewports.current)));
+    if (!todo.length) return Promise.resolve({ saved: base, crops: target });
+    const run = (async (): Promise<Kept | null> => {
       setSaving(true);
-      let res: SaveResult;
-      try {
-        res = await savePage(file.id, changes);
-      } catch {
-        // The request itself failed. Safe to try again: a new question carries
-        // the id this screen made, so a save that did commit is refused, not doubled.
-        res = { ok: false, kind: "retry", code: null, error: "Not saved. Try again." };
+      setProgress(todo.length > 1 ? { done: 0, of: todo.length } : null);
+      let res: SaveResult | null = null;
+      for (let i = 0; i < todo.length; i++) {
+        try {
+          res = await savePage(file.id, todo[i]);
+        } catch {
+          // The request itself failed. Safe to try again: a new question carries
+          // the id this screen made, so a save that did commit is refused, not doubled.
+          res = { ok: false, kind: "retry", code: null, error: "Not saved. Try again." };
+        }
+        if (!res.ok) {
+          inflight.current = null;
+          setSaving(false);
+          setProgress(null);
+          setFailure(res);
+          setRemaining(i > 0 || parts ? { base, target, parts: todo.slice(i) } : null);
+          return null;
+        }
+        if (todo.length > 1) setProgress({ done: i + 1, of: todo.length });
       }
       inflight.current = null;
       setSaving(false);
-      if (!res.ok) {
-        setFailure(res);
-        return false;
-      }
-      const { crops: next, find } = rebase(res.questions, before);
+      setProgress(null);
+      setRemaining(null);
+      if (!res?.ok) return null;
+      const { crops: next, find } = rebase(res.questions, target);
       setFailure(null);
       setSaved(res.questions);
       setCrops(next);
@@ -520,10 +739,15 @@ export function PageView(props: PageViewProps) {
         return id !== null && isStimulus(next, id) ? id : null;
       });
       setAdding((a) => (a && next.questions.some((q) => q.id === a) ? a : null));
-      return true;
+      return { saved: res.questions, crops: next };
     })();
     inflight.current = run;
     return run;
+  }
+
+  /** Every change on screen saved, or what is left of a save in parts. */
+  function save(): Promise<Kept | null> {
+    return remaining ? persist(remaining.base, remaining.target, remaining.parts) : persist(saved, crops);
   }
 
   function reload() {
@@ -573,19 +797,48 @@ export function PageView(props: PageViewProps) {
 
   // Leaving inside the app another way (the browser's Back) still saves, as a
   // last try with nobody left to tell if it fails.
-  const latest = useRef({ saved, crops, cropping, fileId: file.id });
+  const latest = useRef({ saved, crops, cropping, fileId: file.id, remaining });
   useEffect(() => {
-    latest.current = { saved, crops, cropping, fileId: file.id };
+    latest.current = { saved, crops, cropping, fileId: file.id, remaining };
   });
   useEffect(() => {
     const drawn = viewports.current;
     return () => {
       const l = latest.current;
       if (!l.cropping || inflight.current) return;
-      const changes = diff(l.saved, l.crops, geometryOf(drawn));
-      if (!isEmpty(changes)) void savePage(l.fileId, changes).catch(() => {});
+      const parts = l.remaining?.parts ?? chunks(l.saved, diff(l.saved, l.crops, geometryOf(drawn)));
+      // One after another, as the client sends Server Functions anyway; a refused part stops the rest.
+      void parts
+        .reduce<Promise<boolean>>(
+          (prev, part) => prev.then((ok) => ok && savePage(l.fileId, part).then((r) => r.ok)),
+          Promise.resolve(true),
+        )
+        .catch(() => {});
     };
   }, []);
+
+  // All pages saves on its own once every page with a change is out of view:
+  // the in-charge has left the area (§4.3). Not while Next to check is open,
+  // which saves when it closes, so its key presses never wait for a save; and
+  // not while a box is being drawn, moved or resized, which a save would drop
+  // (edits wait while it runs): a drag's edge scroll can take the page of an
+  // earlier change out of view, and the save then starts when the drag ends.
+  const saveUnseen = useEffectEvent(() => {
+    void save();
+  });
+  useEffect(() => {
+    if (!book || gestures > 0 || saving || checkingOffer !== null || remaining || failure || pending.questions === 0) return;
+    for (const p of pending.pages) if (visible.has(p)) return;
+    saveUnseen();
+  }, [book, gestures, saving, checkingOffer, remaining, failure, pending, visible]);
+  // A save asked for by an action whose changes are only on screen once it has rendered (Next to check closing).
+  const [flush, setFlush] = useState(0);
+  const saveNow = useEffectEvent(() => {
+    void save();
+  });
+  useEffect(() => {
+    if (flush > 0) saveNow();
+  }, [flush]);
 
   // --- editing ------------------------------------------------------------------
   /**
@@ -604,14 +857,21 @@ export function PageView(props: PageViewProps) {
   // The question the toolbar is for: the selected one, or the one a box is being added to.
   const current = selQuestion ?? (adding !== null ? byId.get(adding) : undefined);
   const stimRect = stim !== null ? crops.rects[stim] : undefined;
+  // The page the toolbar speaks of: One page's, or in All pages the selected box's.
+  const herePage = book ? (selRect?.page ?? null) : page;
+
+  /** A page as displayed, to turn a rectangle on it into a box: every page in All pages, the page drawn in One page. */
+  const viewportOf = (p: number): PageViewport | null =>
+    book ? (pageSizes?.[p - 1] ?? null) : shown !== null && shown.page === p ? shown.viewport : null;
 
   /**
    * The screen after an edit. A selection whose rectangle is gone is let go, and
    * so is a stimulus in hand that is no longer one (a box cropped twice, once
-   * one of the two is deleted).
+   * one of the two is deleted). Undo is only for what was done last.
    */
   function apply(next: Crops, nextSel: string | null = sel) {
     setCrops(next);
+    setUndo(null);
     setSel(nextSel !== null && next.rects[nextSel] ? nextSel : null);
     if (stim !== null && (!next.rects[stim] || !isStimulus(next, stim))) setStim(null);
     if (adding !== null && !next.questions.some((q) => q.id === adding)) setAdding(null);
@@ -633,42 +893,40 @@ export function PageView(props: PageViewProps) {
     } else if (adding !== null && users.get(id)?.[0] !== adding) setAdding(null);
   }
 
-  function draw(v: ViewRect) {
-    if (!editable || !shown) return;
+  function draw(v: ViewRect, p: number) {
+    const vp = viewportOf(p);
+    if (!editable || !vp) return;
     setAsking(null);
     setNotice(null);
-    const rect = {
-      id: `n:${crypto.randomUUID()}`,
-      page: shown.page,
-      box: toPdfBox(shown.viewport, v),
-    };
+    const rect = { id: `n:${crypto.randomUUID()}`, page: p, box: toPdfBox(vp, v) };
     if (adding !== null) {
       setAdding(null);
       const next = addBox(crops, adding, rect);
       if (next !== crops) apply(next, rect.id);
       return;
     }
-    // New questions take the Topic for new questions, and the stimulus in hand as box 1.
-    apply(
-      addQuestion(crops, { id: crypto.randomUUID(), topic_id: newTopic || null }, rect, stim),
-      rect.id,
-    );
+    // New questions take the Topic for new questions (in All pages, their
+    // section's), and the stimulus in hand as box 1.
+    const topic = book ? sectionTopic(p, rect.box) : newTopic || null;
+    apply(addQuestion(crops, { id: crypto.randomUUID(), topic_id: topic }, rect, stim), rect.id);
   }
 
   /**
    * A suggestion tapped (§4.3). While a box is being added to a question, its box
-   * is that box, as if drawn. One with a "?" asks first, in the toolbar, with its
-   * reasons; so does every continuation, which needs its question on screen.
-   * Anything else is accepted at once.
+   * is that box, as if drawn. One with a "?" asks first, in the toolbar (in All
+   * pages, in Next to check's panel), with its reasons; so does every
+   * continuation, which needs its question on screen. Anything else is
+   * accepted at once.
    */
   function accept(id: string) {
-    const s = offered.find((x) => x.id === id);
+    const s = (book ? bankOffers : offered).find((x) => x.id === id);
     if (!s || !editable) return;
-    if (adding !== null) return draw(s.view);
+    if (adding !== null) return draw(s.view, s.page);
     if (s.check || s.type === "continuation") {
       setSel(null);
       setNotice(null);
-      setAsking(s.id);
+      if (book) openCheck(s);
+      else setAsking(s.id);
       return;
     }
     take([s]);
@@ -676,21 +934,21 @@ export function PageView(props: PageViewProps) {
 
   /**
    * Suggestions made drafts (crops.ts acceptOffers). One question or box taken
-   * alone is selected, as a drawn one is; what else happened is said in the
-   * toolbar: a stimulus's questions, and any left as they were for four boxes.
+   * alone is selected, as a drawn one is, unless `quiet` (Next to check, which
+   * goes on to the next); what else happened is said in the toolbar: a
+   * stimulus's questions, and any left as they were for four boxes.
    */
-  function take(offers: Offer[]) {
-    if (!editable || !bankFound) return;
-    const res = acceptOffers(crops, bankFound.pages, offers, {
-      topic: newTopic || null,
-      stim,
-      newId: (what) => (what === "question" ? crypto.randomUUID() : `n:${crypto.randomUUID()}`),
-    });
+  function take(offers: Offer[], quiet = false): Crops | null {
+    if (!editable || !bankFound) return null;
+    const how: Accepting = book
+      ? { topic: null, stim, newId, topicOf: (s) => sectionTopic(s.page, s.box, s) }
+      : { topic: newTopic || null, stim, newId };
+    const res = acceptOffers(crops, bankFound.pages, offers, how);
     setAsking(null);
     setAdding(null);
     const one = offers.length === 1 ? offers[0] : null;
     const stimulus = one !== null && (one.type === "stem" || one.type === "context");
-    apply(res.crops, one && !stimulus && res.rects.length === 1 ? res.rects[0] : null);
+    apply(res.crops, !quiet && one && !stimulus && res.rects.length === 1 ? res.rects[0] : null);
     const said: string[] = [];
     if (stimulus) {
       const named = namedOnScreen(res.crops, bankFound.pages, one);
@@ -703,27 +961,30 @@ export function PageView(props: PageViewProps) {
     if (res.full.length > 1) said.push(`${res.full.length} questions already have four boxes, so they were left as they were.`);
     if (res.left.length) said.push("Not accepted: the question it continues isn't cropped yet.");
     setNotice(said.length ? said.join(" ") : null);
+    return res.crops;
   }
 
-  /** Accept all (n): every suggestion on the page without a "?". */
-  function acceptAll() {
+  /** One page's Accept all (n): every suggestion on the page without a "?". */
+  function acceptPage() {
     if (!editable || !shown) return;
     take(sure);
   }
 
   /** The suggestion asked about, made a question of its own: a continuation whose question is not on screen or is full. */
-  function takeAsQuestion(s: Offer) {
-    take([{ ...s, type: "question", for: undefined, boxNo: undefined }]);
+  function takeAsQuestion(s: Offer, quiet = false): Crops | null {
+    return take([{ ...s, type: "question", for: undefined, boxNo: undefined }], quiet);
   }
 
   function skip(s: Offer) {
     setSkipped((prev) => new Set(prev).add(s.id));
     setAsking(null);
+    setUndo(null);
   }
 
-  function change(id: string, v: ViewRect) {
-    if (!editable || !shown) return;
-    apply(moveRect(crops, id, toPdfBox(shown.viewport, v)));
+  function change(id: string, v: ViewRect, p: number) {
+    const vp = viewportOf(p);
+    if (!editable || !vp) return;
+    apply(moveRect(crops, id, toPdfBox(vp, v)));
   }
 
   /** Delete or Backspace: the selected box from its question, or a stimulus from every question. */
@@ -741,16 +1002,243 @@ export function PageView(props: PageViewProps) {
     if (editable) select(id);
   }
 
+  // --- All pages: Accept all, Undo, sections, Next to check ------------------------------
+  /** Scrolls All pages to page p, with y (points down the page) a quarter of the way down the window, or the page's top. */
+  function scrollToPage(p: number, y: number | null = null) {
+    const sc = scrollRef.current;
+    const frame = sc?.querySelector<HTMLElement>(`[data-page="${p}"]`);
+    const vp = pageSizes?.[p - 1];
+    if (!sc || !frame || !vp) return;
+    const sheet = (frame.lastElementChild as HTMLElement | null) ?? frame;
+    const top = sheet.getBoundingClientRect().top - sc.getBoundingClientRect().top + sc.scrollTop;
+    sc.scrollTo({
+      top: Math.max(0, y === null ? top - 30 : top + y * (sheet.clientWidth / vp.width) - sc.clientHeight / 4),
+    });
+  }
+  /**
+   * Accept all over the bank (review.ts acceptAll): every suggestion without a
+   * "?" for any reason but continuing, saved at once, with whatever else was
+   * not saved yet, in as few calls as fit. Undo then takes exactly that away.
+   */
+  async function acceptEverything() {
+    if (!editable || !bankFound) return;
+    const res = acceptAll(crops, bankFound.pages, bankOffers, {
+      topic: null,
+      stim: null,
+      newId,
+      topicOf: (s) => sectionTopic(s.page, s.box, s),
+    });
+    if (!res.taken.length) return;
+    setChecking(null);
+    setAsking(null);
+    setAdding(null);
+    setStim(null);
+    apply(res.crops, null);
+    const words = acceptedWords(res.counts);
+    const left = res.full.length
+      ? ` ${plural(new Set(res.full).size, "question")} already had four boxes, so ${res.full.length === 1 ? "it was" : "they were"} left as ${res.full.length === 1 ? "it was" : "they were"}.`
+      : "";
+    setNotice(`${words}.${left}`);
+    const kept = await persist(saved, res.crops);
+    if (kept) setUndo({ kind: "accept", label: `${words}: saved.${left}`, added: res.added, counts: res.counts });
+  }
+
+  /** Undo: the last Accept all, or the last section's topic, taken back in one save. */
+  async function undoLast() {
+    if (!undo || !editable) return;
+    const u = undo;
+    // Undo goes once pressed: the keyboard's focus goes on to Accept all, not to the page's body.
+    if (document.activeElement === undoButton.current) acceptButton.current?.focus();
+    const target =
+      u.kind === "accept" ? undoAdded(crops, u.added) : u.topics.reduce((c, [q, t]) => setTopic(c, q, t), crops);
+    apply(target, null);
+    if (u.kind === "topics") setSectionPicks(u.picks);
+    setNotice(u.kind === "accept" ? `Undone: ${acceptedWords(u.counts)} taken away again.` : `Undone: ${u.label}`);
+    await persist(saved, target);
+  }
+
+  /** A section's topic chosen: its questions, and those under it set to Same as above, tagged in one save. */
+  async function chooseSection(k: number, choice: Choice) {
+    const row = rows[k];
+    if (!editable || !row) return;
+    const { retag, pick } = chooseTopic(rows, k, choice, (q) => byId.get(q)?.topic_id ?? null);
+    const before = sectionPicks;
+    if (pick !== undefined) setSectionPicks(new Map(before).set(row.section.id, pick));
+    if (!retag.size) return;
+    const was: [string, string | null][] = Array.from(retag.keys(), (q) => [q, byId.get(q)?.topic_id ?? null]);
+    let next = crops;
+    for (const [q, t] of retag) next = setTopic(next, q, t);
+    apply(next);
+    const topic = retag.values().next().value ?? null;
+    // As the rail names it, less a heading's own colon ("Lesson 8:").
+    const heading = row.section.heading ?? (rows.length === 1 ? "The whole bank" : "Before the first heading");
+    const name = heading.replace(/:$/, "");
+    const label = `${name}: ${plural(retag.size, "question")} ${topic === null ? "given no topic" : `tagged ${topicName.get(topic) ?? "a topic"}`}.`;
+    setNotice(label);
+    const kept = await persist(saved, next);
+    if (kept) setUndo({ kind: "topics", label, topics: was, picks: before });
+  }
+
+  /** A section started here taken away again; its questions keep the topics they have. */
+  function removeStart(k: number) {
+    const s = rows[k]?.section;
+    if (s?.started) setStarts((list) => list.filter((x) => `m:${x.page}:${x.y}` !== s.id));
+  }
+
+  /** Where a question's own box starts (its first box no other question has), as displayed. */
+  function startOf(q: CropQuestion): { page: number; y: number; box: PdfBox } | null {
+    const own = q.rects.find((id) => users.get(id)?.length === 1) ?? q.rects[0];
+    const r = own ? crops.rects[own] : undefined;
+    const vp = r ? viewportOf(r.page) : null;
+    return r && vp ? { page: r.page, y: Math.round(toViewRect(vp, r.box).y * 100) / 100, box: r.box } : null;
+  }
+
+  /** Whether a section could start at this question: one does not already. */
+  function canStartAt(q: CropQuestion): boolean {
+    const at = startOf(q);
+    const k = sections?.ofQuestion.get(q.id);
+    const s = k === undefined ? undefined : sections?.list[k];
+    return !!at && !!s && !(s.page === at.page && Math.abs(s.y - at.y) < 1);
+  }
+
+  /** New section here: the selected question starts a section of its own, for its topic in the rail. */
+  function startSection(q: CropQuestion) {
+    const at = startOf(q);
+    if (!at || !bankFound) return;
+    const n = bankFound.pages[at.page - 1]?.proposals.find((x) => x.type === "question" && iou(x.box, at.box) > 0.5)?.n;
+    const name = n !== undefined ? `From question ${n}` : `From p. ${at.page}`;
+    setStarts((list) => [...list, { page: at.page, y: at.y, name }]);
+    select(null);
+    setNotice(`${name} on p. ${at.page} is a section now: choose its topic in Sections.`);
+  }
+
+  /** The first of `list` after `s` in bank order (its page, then its place in the page's list), going round to the first. */
+  function nextAfter(list: readonly Offer[], s: Offer): Offer | null {
+    const at = (x: Offer) => x.page * 100000 + Number(x.id.split(":")[2]);
+    const others = list.filter((x) => x.id !== s.id);
+    return others.find((x) => at(x) > at(s)) ?? others[0] ?? null;
+  }
+
+  /** What is left to check once `next` is the screen: what Accept all would leave on it. */
+  function leftOn(next: Crops): Offer[] {
+    if (!bankFound) return [];
+    let k = 0;
+    return acceptAll(next, bankFound.pages, offeredIn(next, bankFound.pages, skipped), {
+      topic: null,
+      stim: null,
+      newId: (what) => `${what}:${++k}`,
+    }).rest;
+  }
+
+  /** Next to check: a suggestion shown in its panel and scrolled to; by default the next left from the page in view. */
+  function openCheck(s: Offer | null = null) {
+    const item =
+      s ??
+      (checkingOffer !== null ? nextAfter(toCheck, checkingOffer) : null) ??
+      toCheck.find((x) => x.page >= bookPage) ??
+      toCheck[0] ??
+      null;
+    if (!item) return;
+    setSel(null);
+    setStim(null);
+    setAdding(null);
+    setChecking(item.id);
+    scrollToPage(item.page, item.view.y);
+  }
+
+  function moveCheck(next: Offer | null) {
+    if (next) {
+      setChecking(next.id);
+      scrollToPage(next.page, next.view.y);
+    } else closeCheck("Nothing left to check.");
+  }
+
+  /** The panel closed, by Esc or ×, or after its last suggestion: what it accepted is saved. */
+  function closeCheck(said: string | null = null) {
+    setChecking(null);
+    if (said) setNotice(said);
+    setFlush((n) => n + 1);
+  }
+
+  /** What Enter does for a suggestion in the panel: a continuation joins its question when that is cropped and has room. */
+  function checkChoice(s: Offer): CheckChoice {
+    if (s.type !== "continuation" || !bankFound) return { label: "Accept", joins: false };
+    const to = continuesAt(crops, bankFound.pages, s);
+    const q = to ? byId.get(to.id) : undefined;
+    return q && canAddBox(q)
+      ? { label: `Add as box ${to!.at + 1}`, joins: true }
+      : { label: "Accept as a question", joins: false };
+  }
+
+  function checkWhy(s: Offer): string[] {
+    const why = toLookAt(s);
+    if (s.type !== "continuation" || !bankFound) return why;
+    const on = namedOnScreen(crops, bankFound.pages, s)[0];
+    const q = on?.id ? byId.get(on.id) : undefined;
+    const where = on ? `question ${on.ref.n} on p. ${on.ref.page}` : "a question";
+    return [
+      q ? (canAddBox(q) ? `Continues ${where}` : `Continues ${where}, which has four boxes already`) : `Continues ${where}, which isn't cropped yet`,
+      ...why,
+    ];
+  }
+
+  // The next one is worked out from the screen after the action: a box
+  // accepted can cover another suggestion left to check, which then goes too.
+  function checkTake() {
+    const s = checkingOffer;
+    if (!s || !editable) return;
+    const next = s.type === "continuation" && !checkChoice(s).joins ? takeAsQuestion(s, true) : take([s], true);
+    moveCheck(nextAfter(next ? leftOn(next) : toCheck, s));
+  }
+
+  function checkSkip() {
+    const s = checkingOffer;
+    if (!s) return;
+    skip(s);
+    moveCheck(nextAfter(toCheck, s));
+  }
+
+  function showBook() {
+    if (book) return;
+    setView("book");
+    setAsking(null);
+    setNotice(null);
+    // All pages opens where One page was.
+    setBookPage(page ?? 1);
+    keepInUrl(null, topicId);
+  }
+
+  function showPage() {
+    if (!book) return;
+    void save();
+    setView("page");
+    setChecking(null);
+    setDrawer(false);
+    setNotice(null);
+    if (scrollRef.current) scrollRef.current.scrollTop = 0;
+    turned.current = true;
+    setPageNo(bookPage);
+    keepInUrl(bookPage, topicId);
+  }
+
   const onKey = useEffectEvent((e: KeyboardEvent) => {
     // The worksheet modal is over the page: its keys are its own.
     if (making) return;
+    // Esc closes the sections drawer first, from anywhere in it, a topic picker included.
+    if (e.key === "Escape" && drawer) {
+      e.preventDefault();
+      setDrawer(false);
+      return;
+    }
     const t = e.target;
     if (t instanceof HTMLElement && (t.closest("input, select, textarea") || t.isContentEditable)) return;
     if (e.key === "Escape") {
+      if (checking !== null) closeCheck();
       if (sel !== null || stim !== null || adding !== null || asking !== null) select(null);
       return;
     }
-    if (!editable || !shown || !selRect || selRect.page !== shown.page) return;
+    const vp = selRect ? viewportOf(selRect.page) : null;
+    if (!editable || !selRect || !vp) return;
     if (e.key === "Delete" || e.key === "Backspace") {
       e.preventDefault();
       removeSelected();
@@ -763,10 +1251,10 @@ export function PageView(props: PageViewProps) {
     if (!d) return;
     e.preventDefault();
     const step = e.shiftKey ? 10 : 1;
-    const v = toViewRect(shown.viewport, selRect.box);
-    const x = Math.min(shown.viewport.width - v.w, Math.max(0, v.x + d[0] * step));
-    const y = Math.min(shown.viewport.height - v.h, Math.max(0, v.y + d[1] * step));
-    apply(moveRect(crops, selRect.id, toPdfBox(shown.viewport, { ...v, x, y })));
+    const v = toViewRect(vp, selRect.box);
+    const x = Math.min(vp.width - v.w, Math.max(0, v.x + d[0] * step));
+    const y = Math.min(vp.height - v.h, Math.max(0, v.y + d[1] * step));
+    apply(moveRect(crops, selRect.id, toPdfBox(vp, { ...v, x, y })));
   });
   useEffect(() => {
     const listener = (e: KeyboardEvent) => onKey(e);
@@ -775,18 +1263,18 @@ export function PageView(props: PageViewProps) {
   }, []);
 
   // --- the overlay --------------------------------------------------------------
-  const items = useMemo<StageItem[]>(() => {
-    if (!shown) return [];
+  /** The boxes on page p, largest first, so a box inside another is on top of it. */
+  function boxItems(p: number, vp: PageViewport): StageItem[] {
     const own = current?.rects ?? [];
-    return Object.values(crops.rects)
-      .filter((r) => r.page === shown.page)
+    return (rectsOn.get(p) ?? [])
       .map((r) => {
         const qs = users.get(r.id) ?? [];
         const stimulus = isStimulus(crops, r.id, users);
         const q = stimulus ? undefined : byId.get(qs[0]);
         const picked = !!q && picks.includes(q.id);
         const warn = manager && qs.some((id) => dupes.has(id));
-        const dim = topicId !== "" && !qs.some((id) => byId.get(id)?.topic_id === topicId);
+        // The topic filter is One page's; All pages has none.
+        const dim = !book && topicId !== "" && !qs.some((id) => byId.get(id)?.topic_id === topicId);
         const topic = q?.topic_id ? (topicName.get(q.topic_id) ?? null) : null;
         const k = own.indexOf(r.id);
         const nth = k >= 0 && own.length > 1 ? `box ${k + 1} of ${own.length}` : null;
@@ -804,7 +1292,7 @@ export function PageView(props: PageViewProps) {
           : ["Question", topic, nth, picked ? "picked" : null].filter(Boolean).join(", ");
         return {
           id: r.id,
-          v: toViewRect(shown.viewport, r.box),
+          v: toViewRect(vp, r.box),
           draft: drafts.has(r.id),
           stimulus,
           outlined: k >= 0 || r.id === sel,
@@ -818,32 +1306,89 @@ export function PageView(props: PageViewProps) {
         };
       })
       .sort((a, b) => b.v.w * b.v.h - a.v.w * a.v.h);
-  }, [shown, crops, users, byId, current, picks, manager, dupes, topicId, topicName, drafts, sel, stim]);
+  }
 
-  // Suggestions first, so every box is drawn over them.
-  const stageItems = useMemo<StageItem[]>(
-    () => [
-      ...offered.map((s) => ({
-        id: s.id,
-        v: s.view,
-        draft: false,
-        stimulus: false,
-        outlined: false,
-        active: false,
-        picked: false,
-        dim: false,
-        label: tagOf(s),
-        warn: false,
-        pickable: false,
-        suggestion: true as const,
-        check: s.check,
-        asked: s.id === asking,
-        title: `${nameOf(s)}: accept it${s.check ? ` (check it: ${s.check.join("; ")})` : ""}`,
-      })),
-      ...items,
-    ],
-    [offered, items, asking],
-  );
+  /** Suggestions, drawn under every box. */
+  const suggestionItems = (offers: readonly Offer[]): StageItem[] =>
+    offers.map((s) => ({
+      id: s.id,
+      v: s.view,
+      draft: false,
+      stimulus: false,
+      outlined: false,
+      active: false,
+      picked: false,
+      dim: false,
+      label: tagOf(s),
+      warn: false,
+      pickable: false,
+      suggestion: true as const,
+      check: s.check,
+      asked: s.id === asking || s.id === checking,
+      title: `${nameOf(s)}: accept it${s.check ? ` (check it: ${s.check.join("; ")})` : ""}`,
+    }));
+
+  const items = shown ? boxItems(shown.page, shown.viewport) : [];
+  const stageItems = [...suggestionItems(offered), ...items];
+
+  // The handlers as of the last commit, for All pages' overlays (BookStage), which
+  // are not rendered again with each new closure. Set as the screen is committed,
+  // before any event can reach it.
+  const on = useRef({ select, draw, change, activate, accept, editable });
+  useLayoutEffect(() => {
+    on.current = { select, draw, change, activate, accept, editable };
+  });
+
+  /**
+   * All pages: a page's overlay. Every page has one, drawn or not, so Tab goes
+   * on through the whole bank (focus scrolls a page into view, which draws
+   * it); a page not drawn yet takes keys but no pointer.
+   */
+  function bookStage(p: number, drawn: boolean) {
+    const vp = pageSizes?.[p - 1];
+    if (!vp) return null;
+    return (
+      <BookStage
+        width={vp.width}
+        height={vp.height}
+        pxPerUnit={width / vp.width}
+        items={[...suggestionItems(offersByPage.get(p) ?? []), ...boxItems(p, vp)]}
+        selected={selRect?.page === p ? sel : null}
+        mode={editable && drawn ? "crop" : "busy"}
+        scroller={scrollRef}
+        onSelect={(id) => on.current.editable && on.current.select(id)}
+        onDraw={(v) => on.current.draw(v, p)}
+        onChange={(id, v) => on.current.change(id, v, p)}
+        onActivate={(id) => on.current.activate(id)}
+        onAccept={(id) => on.current.accept(id)}
+        onGesture={(live) => setGestures((n) => Math.max(0, n + (live ? 1 : -1)))}
+      />
+    );
+  }
+
+  /** All pages: what is said beside a page's number. */
+  function bookLabel(p: number) {
+    const n = onPage.get(p)?.size ?? 0;
+    const offers = offersByPage.get(p) ?? [];
+    const looks = offers.filter((s) => toLookAt(s).length > 0).length;
+    const kind = bankFound?.pages[p - 1]?.kind;
+    const said = [
+      n ? plural(n, "question") : null,
+      offers.length ? `${offers.length} suggested` : null,
+      kind && kind !== "digital" && !n && !offers.length ? KIND[kind] : null,
+    ].filter(Boolean);
+    return (
+      <>
+        {said.length > 0 && <span>· {said.join(" · ")}</span>}
+        {looks > 0 && (
+          <span style={{ color: "#fff", background: "var(--honey-deep)", borderRadius: 5, padding: "0 5px", fontWeight: 700 }}>
+            {looks} ?
+          </span>
+        )}
+        {pending.pages.has(p) && <span style={{ color: "var(--berry-deep)", fontWeight: 700 }}>· not saved</span>}
+      </>
+    );
+  }
 
   const vw = shown?.viewport.width ?? 595;
   const vh = shown?.viewport.height ?? 842;
@@ -854,13 +1399,13 @@ export function PageView(props: PageViewProps) {
   };
 
   // --- the toolbar's question ---------------------------------------------------
-  const here = current ? current.rects.flatMap((id, i) => (crops.rects[id].page === page ? [i] : [])) : [];
+  const here = current ? current.rects.flatMap((id, i) => (crops.rects[id].page === herePage ? [i] : [])) : [];
   const elsewhere = current
     ? Array.from(
         new Map(
           current.rects
             .map((id, i) => ({ id, i, p: crops.rects[id].page }))
-            .filter((x) => x.p !== page)
+            .filter((x) => x.p !== herePage)
             .map((x) => [
               // Where it starts, where it goes on to after this page, and any other box by its number.
               here.length && x.i === 0
@@ -874,6 +1419,38 @@ export function PageView(props: PageViewProps) {
       )
     : [];
   const dupeUnderSel = selIsStim && sel !== null ? (users.get(sel) ?? []).filter((id) => dupes.has(id)) : [];
+  /** One of a question's other boxes: its page turned to (One page) or scrolled to (All pages), and selected. */
+  function toBox(x: { id: string; p: number }) {
+    if (!book) return goTo(x.p, x.id);
+    const r = crops.rects[x.id];
+    const vp = viewportOf(x.p);
+    setSel(x.id);
+    scrollToPage(x.p, r && vp ? toViewRect(vp, r.box).y : null);
+  }
+
+  // All pages' line, when nothing is selected.
+  const bookLine = saving
+    ? progress
+      ? `Saving: part ${Math.min(progress.done + 1, progress.of)} of ${progress.of}…`
+      : "Saving…"
+    : failure?.kind === "reload"
+      ? "Reload the page to go on cropping."
+      : remaining
+        ? "Part of it is saved, the rest isn't yet."
+        : null;
+  const summary = !forDoc
+    ? reading && reading.pages > 1
+      ? `Finding suggestions: page ${Math.min(reading.done + 1, reading.pages)} of ${reading.pages}…`
+      : "Finding suggestions…"
+    : !bankFound
+      ? "Suggestions failed on this bank. Drag on a page to draw a box."
+      : [
+          `${plural(saved.length, "question")} saved`,
+          plan?.taken.length ? `${plan.taken.length} suggested to accept` : null,
+          toCheck.length ? `${toCheck.length} to check` : null,
+        ]
+          .filter(Boolean)
+          .join(" · ") + ". Drag on a page to draw a box.";
 
   return (
     <div
@@ -884,6 +1461,7 @@ export function PageView(props: PageViewProps) {
       }}
     >
       <header
+        inert={drawerOpen}
         className="flex items-center gap-x-3 gap-y-2 flex-wrap"
         style={{
           padding: "10px 16px",
@@ -916,44 +1494,84 @@ export function PageView(props: PageViewProps) {
           {file.name}
         </span>
 
-        {pages.length > 0 && page !== null && (
-          <div className="flex items-center gap-1.5">
-            <button
-              className="btn btn-ghost btn-sm"
-              style={{ padding: 7 }}
-              onClick={() => at > 0 && goTo(pages[at - 1])}
-              disabled={at <= 0}
-              aria-label="Previous page"
-            >
-              <ChevronRightIcon width={16} height={16} style={{ transform: "rotate(180deg)" }} />
-            </button>
-            <select
-              className="field"
-              style={{ width: "auto", padding: "6px 10px", fontSize: 14 }}
-              value={page}
-              onChange={(e) => goTo(Number(e.target.value))}
-              aria-label="Page"
-            >
-              {pages.map((p) => (
-                <option key={p} value={p}>
-                  {optionLabel(p)}
-                </option>
-              ))}
-            </select>
-            <button
-              className="btn btn-ghost btn-sm"
-              style={{ padding: 7 }}
-              onClick={() => at < pages.length - 1 && goTo(pages[at + 1])}
-              disabled={at < 0 || at >= pages.length - 1}
-              aria-label="Next page"
-            >
-              <ChevronRightIcon width={16} height={16} />
-            </button>
+        {cropping && doc && (
+          <div className="flex items-center gap-1" role="group" aria-label="View" style={{ borderBottom: "1px solid var(--line)" }}>
+            {(["book", "page"] as const).map((v) => (
+              <button
+                key={v}
+                onClick={() => (v === "book" ? showBook() : showPage())}
+                aria-pressed={view === v}
+                style={{
+                  padding: "6px 10px",
+                  fontWeight: 800,
+                  fontSize: 13.5,
+                  whiteSpace: "nowrap",
+                  color: view === v ? "var(--ink)" : "var(--ink-soft)",
+                  borderBottom: `2.5px solid ${view === v ? "var(--berry)" : "transparent"}`,
+                  marginBottom: -1,
+                }}
+              >
+                {v === "book" ? "All pages" : "One page"}
+              </button>
+            ))}
           </div>
         )}
 
-        {/* Hidden, like every topic picker, while the course has no topics. */}
-        {topics.length > 0 && doc && (
+        {book
+          ? pageSizes && (
+              <select
+                className="field"
+                style={{ width: "auto", padding: "6px 10px", fontSize: 14 }}
+                value={bookPage}
+                onChange={(e) => scrollToPage(Number(e.target.value))}
+                aria-label="Page"
+              >
+                {pageSizes.map((_, i) => (
+                  <option key={i + 1} value={i + 1}>
+                    {optionLabel(i + 1)}
+                  </option>
+                ))}
+              </select>
+            )
+          : pages.length > 0 &&
+            page !== null && (
+              <div className="flex items-center gap-1.5">
+                <button
+                  className="btn btn-ghost btn-sm"
+                  style={{ padding: 7 }}
+                  onClick={() => at > 0 && goTo(pages[at - 1])}
+                  disabled={at <= 0}
+                  aria-label="Previous page"
+                >
+                  <ChevronRightIcon width={16} height={16} style={{ transform: "rotate(180deg)" }} />
+                </button>
+                <select
+                  className="field"
+                  style={{ width: "auto", padding: "6px 10px", fontSize: 14 }}
+                  value={page}
+                  onChange={(e) => goTo(Number(e.target.value))}
+                  aria-label="Page"
+                >
+                  {pages.map((p) => (
+                    <option key={p} value={p}>
+                      {optionLabel(p)}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  className="btn btn-ghost btn-sm"
+                  style={{ padding: 7 }}
+                  onClick={() => at < pages.length - 1 && goTo(pages[at + 1])}
+                  disabled={at < 0 || at >= pages.length - 1}
+                  aria-label="Next page"
+                >
+                  <ChevronRightIcon width={16} height={16} />
+                </button>
+              </div>
+            )}
+
+        {/* Hidden, like every topic picker, while the course has no topics; All pages tags by section instead. */}
+        {!book && topics.length > 0 && doc && (
           <select
             className="field"
             style={{ width: "auto", padding: "6px 10px", fontSize: 14 }}
@@ -982,7 +1600,7 @@ export function PageView(props: PageViewProps) {
       </header>
 
       {cropping && doc && (
-        <div ref={aboveRef}>
+        <div ref={aboveRef} inert={drawerOpen}>
           <div
             className="flex items-center gap-2 flex-wrap"
             style={{
@@ -997,7 +1615,7 @@ export function PageView(props: PageViewProps) {
               <>
                 <span style={{ fontWeight: 800 }}>
                   Cropped twice
-                  {selRect.page !== page && ` on p. ${selRect.page}`}
+                  {selRect.page !== herePage && ` on p. ${selRect.page}`}
                 </span>
                 <span style={{ color: "var(--ink-soft)" }}>
                   This box is saved as {plural(users.get(selRect.id)?.length ?? 0, "question")}.
@@ -1014,7 +1632,7 @@ export function PageView(props: PageViewProps) {
               <>
                 <span style={{ fontWeight: 800 }}>
                   Stimulus
-                  {selRect.page !== page && ` on p. ${selRect.page}`}
+                  {selRect.page !== herePage && ` on p. ${selRect.page}`}
                   {" · "}
                   {users.get(selRect.id)?.length
                     ? `above ${plural(users.get(selRect.id)!.length, "question")}`
@@ -1041,7 +1659,7 @@ export function PageView(props: PageViewProps) {
                   {current.rects.length > 1 && ` · ${current.rects.length} boxes`}
                 </span>
                 {elsewhere.map(([text, x]) => (
-                  <button key={text} className="btn btn-quiet btn-sm" onClick={() => goTo(x.p, x.id)}>
+                  <button key={text} className="btn btn-quiet btn-sm" onClick={() => toBox(x)}>
                     {text}
                   </button>
                 ))}
@@ -1108,7 +1726,16 @@ export function PageView(props: PageViewProps) {
                     )}
                   </button>
                 )}
-                {selRect && selQuestion && current.rects.length > 1 && selRect.page === page && (
+                {book && topics.length > 0 && selQuestion && canStartAt(selQuestion) && (
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    title="Where the bank starts a section the finder did not read: its topic is then chosen in Sections"
+                    onClick={() => startSection(selQuestion)}
+                  >
+                    New section here
+                  </button>
+                )}
+                {selRect && selQuestion && current.rects.length > 1 && selRect.page === herePage && (
                   <button className="btn btn-ghost btn-sm" disabled={!editable} onClick={removeSelected}>
                     Remove box
                   </button>
@@ -1122,7 +1749,7 @@ export function PageView(props: PageViewProps) {
                 </button>
                 {adding === current.id ? (
                   <span style={{ color: "var(--berry-deep)", fontWeight: 700 }}>
-                    Drag on this page or another to add box {current.rects.length + 1}. Esc cancels.
+                    Drag on {book ? "any page" : "this page or another"} to add box {current.rects.length + 1}. Esc cancels.
                   </span>
                 ) : (
                   current.rects.length >= MAX_BOXES && (
@@ -1132,6 +1759,29 @@ export function PageView(props: PageViewProps) {
                   )
                 )}
               </>
+            ) : book ? (
+              <span className="flex items-center gap-2 flex-wrap" style={{ color: "var(--ink-soft)" }}>
+                {bookLine ?? (
+                  <>
+                    {(undo?.label ?? notice) !== null && (
+                      <span style={{ color: "var(--ink)", fontWeight: 700 }}>{undo?.label ?? notice}</span>
+                    )}
+                    {undo ? (
+                      <button
+                        ref={undoButton}
+                        className="btn btn-ghost btn-sm"
+                        disabled={!editable}
+                        onClick={() => void undoLast()}
+                      >
+                        Undo
+                      </button>
+                    ) : (
+                      <span>{summary}</span>
+                    )}
+                  </>
+                )}
+                <span className="hidden pointer-coarse:inline">Two fingers scroll.</span>
+              </span>
             ) : asked ? (
               <AskedSuggestion
                 s={asked}
@@ -1192,44 +1842,85 @@ export function PageView(props: PageViewProps) {
               </span>
             )}
             <div className="flex items-center gap-2 flex-wrap" style={{ marginLeft: "auto" }}>
-              {found && (
-                <span
-                  style={{
-                    color: "var(--ink-soft)",
-                    fontSize: 12.5,
-                    fontWeight: 700,
-                    padding: "2px 9px",
-                    border: "1px solid var(--line-strong)",
-                    borderRadius: 999,
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {KIND[found.kind]}
-                </span>
-              )}
-              {sure.length > 0 && (
-                <button className="btn btn-ghost btn-sm" disabled={!editable} onClick={acceptAll}>
-                  Accept all ({sure.length})
-                </button>
-              )}
-              {topics.length > 0 && (
-                <label className="flex items-center gap-2" style={{ color: "var(--ink-soft)" }}>
-                  New questions
-                  <select
-                    className="field"
-                    style={{ width: "auto", padding: "5px 10px", fontSize: 13.5 }}
-                    value={newTopic}
-                    onChange={(e) => setNewTopic(e.target.value)}
-                    aria-label="Topic for new questions"
-                  >
-                    <option value="">No topic</option>
-                    {topics.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+              {book ? (
+                <>
+                  {bankFound && (
+                    // aria-disabled, not disabled: pressed, it keeps the keyboard's focus through its save.
+                    <button
+                      ref={acceptButton}
+                      className="btn btn-primary btn-sm"
+                      aria-disabled={!editable || !plan?.taken.length}
+                      onClick={() => void acceptEverything()}
+                      title="Every suggestion without a ?, each continuation joined to its question, saved at once"
+                    >
+                      Accept all {plan?.taken.length ?? 0}
+                    </button>
+                  )}
+                  {bankFound && (
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      disabled={!editable || !toCheck.length}
+                      onClick={() => openCheck()}
+                    >
+                      Next to check ({toCheck.length})
+                    </button>
+                  )}
+                  {/* .btn sets display outside Tailwind's layers, so the breakpoint is on a wrapper. */}
+                  {topics.length > 0 && (
+                    <span className="min-[1100px]:hidden">
+                      <button
+                        ref={sectionsButton}
+                        className="btn btn-ghost btn-sm"
+                        aria-haspopup="dialog"
+                        onClick={() => setDrawer(true)}
+                      >
+                        Sections
+                      </button>
+                    </span>
+                  )}
+                </>
+              ) : (
+                <>
+                  {found && (
+                    <span
+                      style={{
+                        color: "var(--ink-soft)",
+                        fontSize: 12.5,
+                        fontWeight: 700,
+                        padding: "2px 9px",
+                        border: "1px solid var(--line-strong)",
+                        borderRadius: 999,
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {KIND[found.kind]}
+                    </span>
+                  )}
+                  {sure.length > 0 && (
+                    <button className="btn btn-ghost btn-sm" disabled={!editable} onClick={acceptPage}>
+                      Accept all ({sure.length})
+                    </button>
+                  )}
+                  {topics.length > 0 && (
+                    <label className="flex items-center gap-2" style={{ color: "var(--ink-soft)" }}>
+                      New questions
+                      <select
+                        className="field"
+                        style={{ width: "auto", padding: "5px 10px", fontSize: 13.5 }}
+                        value={newTopic}
+                        onChange={(e) => setNewTopic(e.target.value)}
+                        aria-label="Topic for new questions"
+                      >
+                        <option value="">No topic</option>
+                        {topics.map((t) => (
+                          <option key={t.id} value={t.id}>
+                            {t.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+                </>
               )}
             </div>
           </div>
@@ -1242,146 +1933,230 @@ export function PageView(props: PageViewProps) {
                 : `This file has answers on ${pagesText(answerPages)}. Upload a clean copy without the answer pages and crop that.`}
             </div>
           )}
+          {/* All pages says why a save failed here, outside the scroll, so the pages do not move. */}
+          {book && failure && (
+            <FailureAlert failure={failure} reloading={reloading} saving={saving} onReload={reload} onRetry={() => void save()} strip />
+          )}
         </div>
       )}
 
-      <div ref={scrollRef} className="flex-1 min-h-0 overflow-auto scroll-soft">
-        <div style={{ maxWidth: COLUMN_MAX, margin: "0 auto", padding: 16, paddingBottom: picks.length ? 88 : 16 }}>
-          <div ref={columnRef}>
-            {manager && !file.eff_teacher_only && (
-              <div
-                className="card"
-                style={{
-                  padding: "10px 14px",
-                  marginBottom: 12,
-                  borderColor: "#f1c7cd",
-                  background: "var(--berry-wash)",
-                  color: "var(--berry-deep)",
-                  fontWeight: 700,
-                  fontSize: 14,
-                }}
-              >
-                Students can see this file. Make it teacher-only before cropping.
-              </div>
-            )}
-
-            {failure && (
-              <div role="alert" className="card flex items-center gap-3 flex-wrap" style={ALERT}>
-                <span>
-                  {failure.code !== null && failure.kind !== "retry" ? `Not saved: ${failure.error}` : failure.error}
-                </span>
-                {failure.kind === "reload" ? (
-                  <button className="btn btn-ghost btn-sm" onClick={reload} disabled={reloading}>
-                    {reloading ? "Reloading…" : "Reload page"}
-                  </button>
-                ) : failure.kind === "retry" ? (
-                  <button className="btn btn-ghost btn-sm" onClick={() => void save()} disabled={saving}>
-                    {saving ? "Saving…" : "Try again"}
-                  </button>
-                ) : null}
-              </div>
-            )}
-
-            {nothingCropped ? (
-              <Notice title="Nothing is cropped in this bank" />
-            ) : pdf.status === "error" ? (
-              <Notice title="Can't open this file" body={pdf.message} onRetry={pdf.retry ? reopen : undefined} />
-            ) : pdf.status === "loading" ? (
-              <div
-                className="flex flex-col items-center gap-3"
-                style={{ padding: "72px 0", color: "var(--ink-soft)" }}
-              >
-                <SpinnerIcon width={28} height={28} />
-                <p style={{ fontSize: 14, fontWeight: 700 }}>
-                  {file.size_bytes !== null && file.size_bytes > BIG_BANK
-                    ? `Downloading ${file.name} · ${formatBytes(file.size_bytes)}…`
-                    : "Preparing…"}
-                </p>
-              </div>
-            ) : page === null ? (
-              <Notice
-                title={
-                  topicId
-                    ? "No question in this bank has this topic"
-                    : "Nothing is cropped in this bank"
-                }
-              />
-            ) : (
-              <>
-                {renderError && (
-                  <p style={{ color: "var(--berry-deep)", fontWeight: 700, fontSize: 14, marginBottom: 8 }}>
-                    {renderError}
-                  </p>
-                )}
-                {undrawn !== null && undrawn === shown?.page && shown.page === page && (
-                  <div role="alert" className="card flex items-center gap-3 flex-wrap" style={ALERT}>
-                    <span>
-                      {`Part of p. ${undrawn} didn't draw: an image on it couldn't be decoded, so the ` +
-                        "page may show blank or with its text missing."}
-                    </span>
-                    <button className="btn btn-ghost btn-sm" onClick={reopen}>
-                      Try again
-                    </button>
-                  </div>
-                )}
+      <div className="flex-1 min-h-0 flex" inert={drawerOpen}>
+        {book && topics.length > 0 && doc && (
+          <aside
+            className="hidden min-[1100px]:flex flex-col min-h-0"
+            style={{ width: 260, flex: "none", background: "var(--surface)", borderRight: "1px solid var(--line)" }}
+          >
+            <SectionsRail
+              rows={rows}
+              topics={topics}
+              disabled={!editable}
+              finding={!forDoc || !geometry}
+              onChoose={(k, c) => void chooseSection(k, c)}
+              onOpen={(k) => rows[k] && scrollToPage(rows[k].pages[0], rows[k].section.heading ? rows[k].section.y : null)}
+              onRemove={removeStart}
+            />
+          </aside>
+        )}
+        <div ref={scrollRef} className="flex-1 min-h-0 min-w-0 overflow-auto scroll-soft">
+          <div style={{ maxWidth: COLUMN_MAX, margin: "0 auto", padding: 16, paddingBottom: picks.length ? 88 : 16 }}>
+            <div ref={columnRef}>
+              {manager && !file.eff_teacher_only && (
                 <div
-                  className="relative"
+                  className="card"
                   style={{
-                    aspectRatio: `${vw} / ${vh}`,
-                    background: "#fff",
-                    borderRadius: 4,
-                    boxShadow: "var(--shadow-card)",
-                    overflow: "hidden",
+                    padding: "10px 14px",
+                    marginBottom: 12,
+                    borderColor: "#f1c7cd",
+                    background: "var(--berry-wash)",
+                    color: "var(--berry-deep)",
+                    fontWeight: 700,
+                    fontSize: 14,
                   }}
                 >
-                  <div ref={hostRef} className="absolute inset-0" />
-                  {shown && (
-                    <Stage
-                      width={vw}
-                      height={vh}
-                      pxPerUnit={width / vw}
-                      items={stageItems}
-                      selected={shown.page === page ? sel : null}
-                      mode={!cropping ? "pick" : editable ? "crop" : "busy"}
-                      scroller={scrollRef}
-                      onSelect={(id) => editable && select(id)}
-                      onDraw={draw}
-                      onChange={change}
-                      onActivate={activate}
-                      onAccept={accept}
-                    />
-                  )}
-                  {shown?.page !== page && !renderError && (
-                    <span
-                      className="absolute"
-                      style={{ top: 10, right: 10, color: "var(--ink-soft)" }}
-                      aria-label="Drawing the page"
-                    >
-                      <SpinnerIcon width={20} height={20} />
-                    </span>
-                  )}
+                  Students can see this file. Make it teacher-only before cropping.
                 </div>
-                {!manager && (
-                  <p style={{ color: "var(--ink-soft)", fontSize: 13.5, marginTop: 12 }}>
-                    A crop cut off? Tell your course in-charge which bank and page.
+              )}
+
+              {!book && failure && (
+                <FailureAlert failure={failure} reloading={reloading} saving={saving} onReload={reload} onRetry={() => void save()} />
+              )}
+
+              {nothingCropped ? (
+                <Notice title="Nothing is cropped in this bank" />
+              ) : pdf.status === "error" ? (
+                <Notice title="Can't open this file" body={pdf.message} onRetry={pdf.retry ? reopen : undefined} />
+              ) : pdf.status === "loading" || (book && pageSizes === undefined) ? (
+                <div
+                  className="flex flex-col items-center gap-3"
+                  style={{ padding: "72px 0", color: "var(--ink-soft)" }}
+                >
+                  <SpinnerIcon width={28} height={28} />
+                  <p style={{ fontSize: 14, fontWeight: 700 }}>
+                    {pdf.status === "loading" && file.size_bytes !== null && file.size_bytes > BIG_BANK
+                      ? `Downloading ${file.name} · ${formatBytes(file.size_bytes)}…`
+                      : "Preparing…"}
                   </p>
-                )}
-              </>
-            )}
+                </div>
+              ) : book ? (
+                pageSizes && doc ? (
+                  <BookView
+                    doc={doc}
+                    sizes={pageSizes}
+                    width={width}
+                    scroller={scrollRef}
+                    start={bookPage}
+                    stage={bookStage}
+                    label={bookLabel}
+                    onVisible={setVisible}
+                    onCurrent={setBookPage}
+                    onDrawn={() => setDrawnCount((n) => n + 1)}
+                    onRetry={reopen}
+                  />
+                ) : (
+                  <Notice
+                    title="Can't show every page"
+                    body="A page of this bank could not be read. Try again, or crop it in One page."
+                    onRetry={reopen}
+                  />
+                )
+              ) : page === null ? (
+                <Notice
+                  title={
+                    topicId
+                      ? "No question in this bank has this topic"
+                      : "Nothing is cropped in this bank"
+                  }
+                />
+              ) : (
+                <>
+                  {renderError && (
+                    <p style={{ color: "var(--berry-deep)", fontWeight: 700, fontSize: 14, marginBottom: 8 }}>
+                      {renderError}
+                    </p>
+                  )}
+                  {undrawn !== null && undrawn === shown?.page && shown.page === page && (
+                    <div role="alert" className="card flex items-center gap-3 flex-wrap" style={ALERT}>
+                      <span>
+                        {`Part of p. ${undrawn} didn't draw: an image on it couldn't be decoded, so the ` +
+                          "page may show blank or with its text missing."}
+                      </span>
+                      <button className="btn btn-ghost btn-sm" onClick={reopen}>
+                        Try again
+                      </button>
+                    </div>
+                  )}
+                  <div
+                    className="relative"
+                    style={{
+                      aspectRatio: `${vw} / ${vh}`,
+                      background: "#fff",
+                      borderRadius: 4,
+                      boxShadow: "var(--shadow-card)",
+                      overflow: "hidden",
+                    }}
+                  >
+                    <div ref={hostRef} className="absolute inset-0" />
+                    {shown && (
+                      <Stage
+                        width={vw}
+                        height={vh}
+                        pxPerUnit={width / vw}
+                        items={stageItems}
+                        selected={shown.page === page ? sel : null}
+                        mode={!cropping ? "pick" : editable ? "crop" : "busy"}
+                        scroller={scrollRef}
+                        onSelect={(id) => editable && select(id)}
+                        onDraw={(v) => draw(v, shown.page)}
+                        onChange={(id, v) => change(id, v, shown.page)}
+                        onActivate={activate}
+                        onAccept={accept}
+                      />
+                    )}
+                    {shown?.page !== page && !renderError && (
+                      <span
+                        className="absolute"
+                        style={{ top: 10, right: 10, color: "var(--ink-soft)" }}
+                        aria-label="Drawing the page"
+                      >
+                        <SpinnerIcon width={20} height={20} />
+                      </span>
+                    )}
+                  </div>
+                  {!manager && (
+                    <p style={{ color: "var(--ink-soft)", fontSize: 13.5, marginTop: 12 }}>
+                      A crop cut off? Tell your course in-charge which bank and page.
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
           </div>
         </div>
       </div>
 
-      {/* The picks bar: a teacher's picks for this course, kept in the tab (§2.2). */}
-      <PicksBar
-        count={picks.length}
-        onMake={async () => {
-          // What prints is what is saved, so a crop changed here is saved first.
-          if (cropping) await save();
-          setMaking(true);
-        }}
-        onClear={clearPicks}
-      />
+      {/* What Accept all, Undo and a section's topic did, and their saving, read out as it
+          changes; outside everything the drawer makes inert, so a topic chosen in it is too. */}
+      <p role="status" className="sr-only">
+        {book ? (bookLine ?? undo?.label ?? notice ?? "") : ""}
+      </p>
+
+      {/* The sections, as a drawer, where the screen is too narrow to keep them beside the pages. */}
+      {drawerOpen && (
+        <div className="fixed inset-0 min-[1100px]:hidden" style={{ zIndex: 45 }}>
+          <div className="absolute inset-0" style={{ background: "rgba(43,36,23,0.28)" }} onClick={() => setDrawer(false)} />
+          <aside
+            ref={drawerRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Sections"
+            className="absolute flex flex-col"
+            style={{ top: 0, bottom: 0, left: 0, width: "min(300px, 86vw)", background: "var(--surface)", boxShadow: "var(--shadow-pop)" }}
+          >
+            <SectionsRail
+              rows={rows}
+              topics={topics}
+              disabled={!editable}
+              finding={!forDoc || !geometry}
+              onChoose={(k, c) => void chooseSection(k, c)}
+              onOpen={(k) => {
+                setDrawer(false);
+                if (rows[k]) scrollToPage(rows[k].pages[0], rows[k].section.heading ? rows[k].section.y : null);
+              }}
+              onClose={() => setDrawer(false)}
+              onRemove={removeStart}
+            />
+          </aside>
+        </div>
+      )}
+
+      {/* Inert behind the sections drawer, like the rest of the screen. */}
+      <div inert={drawerOpen}>
+        {book && checkingOffer && (
+          <CheckPanel
+            item={checkingOffer}
+            what={`${nameOf(checkingOffer)}, p. ${checkingOffer.page}`}
+            why={checkWhy(checkingOffer)}
+            choice={checkChoice(checkingOffer)}
+            left={toCheck.length + (toCheck.some((s) => s.id === checkingOffer.id) ? 0 : 1)}
+            disabled={!editable}
+            onTake={checkTake}
+            onSkip={checkSkip}
+            onClose={() => closeCheck()}
+          />
+        )}
+
+        {/* The picks bar: a teacher's picks for this course, kept in the tab (§2.2). */}
+        <PicksBar
+          count={picks.length}
+          onMake={async () => {
+            // What prints is what is saved, so a crop changed here is saved first.
+            if (cropping) await save();
+            setMaking(true);
+          }}
+          onClear={clearPicks}
+          canMake={manager}
+        />
+      </div>
       {making && (
         <WorksheetModal
           userId={userId}
@@ -1415,6 +2190,42 @@ const ALERT = {
   fontWeight: 700,
   fontSize: 14,
 } as const;
+
+/** Why a save was refused, and what can be done: Reload page or Try again. A strip under the toolbar in All pages. */
+function FailureAlert({
+  failure,
+  reloading,
+  saving,
+  onReload,
+  onRetry,
+  strip = false,
+}: {
+  failure: SaveFailure;
+  reloading: boolean;
+  saving: boolean;
+  onReload: () => void;
+  onRetry: () => void;
+  strip?: boolean;
+}) {
+  return (
+    <div
+      role="alert"
+      className={`${strip ? "" : "card "}flex items-center gap-3 flex-wrap`}
+      style={strip ? { ...ANSWERS, padding: "6px 16px" } : ALERT}
+    >
+      <span>{failure.code !== null && failure.kind !== "retry" ? `Not saved: ${failure.error}` : failure.error}</span>
+      {failure.kind === "reload" ? (
+        <button className="btn btn-ghost btn-sm" onClick={onReload} disabled={reloading}>
+          {reloading ? "Reloading…" : "Reload page"}
+        </button>
+      ) : failure.kind === "retry" ? (
+        <button className="btn btn-ghost btn-sm" onClick={onRetry} disabled={saving}>
+          {saving ? "Saving…" : "Try again"}
+        </button>
+      ) : null}
+    </div>
+  );
+}
 
 /**
  * The toolbar for a suggestion tapped that asks first (§4.3): one with a "?",

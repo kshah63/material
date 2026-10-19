@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, type CSSProperties, type RefObject } from "react";
+import { useEffect, useEffectEvent, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { CheckIcon } from "@/components/icons";
 import { MIN_BOX } from "@/lib/worksheet/crops";
 import type { ViewRect } from "@/lib/worksheet/source";
@@ -15,10 +15,10 @@ import type { ViewRect } from "@/lib/worksheet/source";
 // that a tap accepts: a drag across it still draws. One marked with the amber
 // "?" says why on hover, and a tap on it asks first (the page view's toolbar).
 // Two fingers scroll the page, because one finger draws. A box drawn or resized
-// near the top or bottom of the page's scroll scrolls it, so a box taller than
-// the window is one drag. Every box is also a button, so Tab reaches it and
-// Enter selects it, or accepts a suggestion; in pick mode a tap or Enter on a
-// box picks its question.
+// near the top or bottom of the page's scroll scrolls it, as far as this page's
+// own edge, so a box taller than the window is one drag. Every box is also a
+// button, so Tab reaches it and Enter selects it, or accepts a suggestion; in
+// pick mode a tap or Enter on a box picks its question.
 
 export interface StageItem {
   id: string;
@@ -113,6 +113,7 @@ export function Stage({
   onChange,
   onActivate,
   onAccept,
+  onGesture,
 }: {
   width: number;
   height: number;
@@ -129,6 +130,8 @@ export function Stage({
   onActivate: (id: string) => void;
   /** A suggestion tapped. */
   onAccept: (id: string) => void;
+  /** A draw, move or resize begun (true) and ended (false), let go or not: a save waits for it (All pages). */
+  onGesture?: (live: boolean) => void;
 }) {
   const stageRef = useRef<HTMLDivElement>(null);
   const gesture = useRef<Gesture | null>(null);
@@ -173,11 +176,35 @@ export function Stage({
     return best ? { id: best.id, edges: null, suggestion: !!best.suggestion } : null;
   }
 
+  // Whether onGesture was told of the gesture in hand, so it is told of its end once.
+  const told = useRef(false);
+  function begin(g: Gesture) {
+    gesture.current = g;
+    if (!told.current) {
+      told.current = true;
+      onGesture?.(true);
+    }
+  }
+
   function cancel() {
     gesture.current = null;
     setLive(null);
     stopScroll();
+    if (told.current) {
+      told.current = false;
+      onGesture?.(false);
+    }
   }
+
+  // Gone mid-gesture (the view switched): the scroll stops, and the gesture is over.
+  const gone = useEffectEvent(() => {
+    stopScroll();
+    if (told.current) {
+      told.current = false;
+      onGesture?.(false);
+    }
+  });
+  useEffect(() => () => gone(), []);
 
   // --- scrolling at the edge ------------------------------------------------------
   // The pointer the scroll follows, and the frame it asked for. A frame finds the
@@ -189,17 +216,26 @@ export function Stage({
     edge.current = null;
   }
 
-  /** Screen pixels to scroll this frame for a pointer at clientY, up negative; 0 away from the edges. */
+  /**
+   * Screen pixels to scroll this frame for a pointer at clientY, up negative; 0
+   * away from the edges, and once this page's own edge that way is in the
+   * scroll: the box stops at the page's edge anyway, and in All pages the scroll
+   * would otherwise run on through the pages after it.
+   */
   function edgeStep(clientY: number): number {
     const s = scroller.current;
-    if (!s) return 0;
+    const stage = stageRef.current;
+    if (!s || !stage) return 0;
     const r = s.getBoundingClientRect();
     const up = r.top + EDGE_PX - clientY;
     const down = clientY - (r.bottom - EDGE_PX);
     const depth = Math.max(up, down);
     if (depth <= 0) return 0;
     const step = Math.min(STEP_PX, Math.ceil((depth / EDGE_PX) * STEP_PX));
-    return up >= down ? -step : step;
+    const page = stage.getBoundingClientRect();
+    return up >= down
+      ? -Math.min(step, Math.max(0, Math.ceil(r.top - page.top)))
+      : Math.min(step, Math.max(0, Math.ceil(page.bottom - r.bottom)));
   }
 
   // One frame: the page scrolls under a still pointer, and the box being drawn
@@ -208,10 +244,10 @@ export function Stage({
     const at = edge.current;
     const s = scroller.current;
     const g = gesture.current;
-    if (!at || !s || (g?.kind !== "draw" && g?.kind !== "resize")) return stopScroll();
+    if (!at || !s || !stageRef.current || (g?.kind !== "draw" && g?.kind !== "resize")) return stopScroll();
     const before = s.scrollTop;
     s.scrollBy(0, edgeStep(at.clientY));
-    // The scroll's end, or a pointer no longer at the edge.
+    // The scroll's or the page's end, or a pointer no longer at the edge.
     if (s.scrollTop === before) return stopScroll();
     follow(g, toPage(at), at.pointerType);
     at.frame = requestAnimationFrame(scrollFrame);
@@ -238,12 +274,12 @@ export function Stage({
     const h = hit(p, e.pointerType);
     const it = h ? items.find((i) => i.id === h.id)! : null;
     if (h && it && h.edges) {
-      gesture.current = { kind: "resize", id: h.id, start: p, orig: it.v, edges: h.edges, moved: false };
+      begin({ kind: "resize", id: h.id, start: p, orig: it.v, edges: h.edges, moved: false });
     } else if (h && it && !h.suggestion) {
       if (h.id !== selected) onSelect(h.id);
-      gesture.current = { kind: "move", id: h.id, start: p, orig: it.v, moved: false };
+      begin({ kind: "move", id: h.id, start: p, orig: it.v, moved: false });
     } else {
-      gesture.current = { kind: "draw", start: p, accept: h?.suggestion ? h.id : null, moved: false };
+      begin({ kind: "draw", start: p, accept: h?.suggestion ? h.id : null, moved: false });
     }
   }
 

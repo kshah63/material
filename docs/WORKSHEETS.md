@@ -921,11 +921,12 @@ above, or adds to it:
   course has no topics or nothing is cropped. A topic is `?topic=` on the
   page, so the server reads the counts (§3.5) and only one of the course's own
   topics filters. Rows narrow to banks with a question of that topic, and the
-  count line reads "2 Fractions questions · 19 in all". With a topic, a row
-  opens the page view at `?topic=`, which sets its Topic select and so opens
-  at the first page with that topic; without one, at `?page=` the bank's first
-  page with questions. A topic no bank has reads "No question in this course
-  has this topic".
+  count line reads "2 Fractions questions · 19 in all". A row opens the page
+  view in One page at `?page=` the bank's first page with questions, for an
+  in-charge too (cropping without `?page=` opens All pages, which has no topic
+  filter). With a topic, `?topic=` as well, which sets its Topic select, so a
+  first page without that topic gives way to the first page with it. A topic
+  no bank has reads "No question in this course has this topic".
 - **Rows** are links, labelled by `bankPath` (`lib/worksheet/layout.ts`), the
   same label the worksheet's bank order sorts by. The warning line is red, and
   for managers it goes on "Make it teacher-only to change its crops."
@@ -1357,6 +1358,159 @@ a suggestion in the bottom 40 px accepted it without scrolling; and *Accept
 all* on a page just turned to and scrolled 300 px down left the page where
 it was.
 
+**As built (continuous crop).** The owner, 2026-10-18: "can cropping a booklet be
+one continuous scroll instead of page by page? want to make it just a few
+seconds for each of these instead of 3 min". Crop questions now opens **All
+pages**: every page of the bank in one scroll, at the column's width, each
+with its suggestions and boxes drawn and every gesture of One page on it
+(draw, move, resize, delete, Add a box, a stimulus put above). One page is
+still there, behind the [All pages | One page] switch in the header and at
+`?page=`, and the switch keeps everything on screen, saved or not: One page
+opens at the page in view, and All pages at the page One page was on.
+Teachers' pick mode is unchanged.
+
+- **The pages** (`components/questions/BookView.tsx`). Every page's size is
+  read when the bank opens, so each page's frame has its height from the
+  start and nothing moves as pages are drawn; a save sets the reading order
+  of a changed page from it too, drawn or not. A page is drawn once it is
+  within half a window of the view, one at a time, nearest first, and let go
+  (its canvas shrunk and dropped, `page.cleanup()`) once it is more than a
+  window away. Every page holds its overlay (`Stage`), drawn or not, with
+  each box and suggestion a button, so Tab goes on through the whole bank: a
+  button focused on a page out of view scrolls it in, which draws it. A page
+  not drawn yet takes keys but no pointer. A page's overlay is rendered again
+  only when what it shows changes (`BookStage`, its handlers the page view's
+  latest by ref), not on every page the scroll passes. Beside each page's
+  number: its questions, suggestions and "?", and "not saved".
+- **Accept all N** (`lib/worksheet/review.ts` `acceptAll`) takes every
+  suggestion in the bank but one with a "?" for any reason other than
+  continuing (`toLookAt`): questions, stems and contexts above the questions
+  they name, and continuations joined to the question they continue in the
+  bank's order, four boxes at most. N is what it would take now. It saves at
+  once, with anything else not yet saved, in as few `save_crops` calls as fit
+  500 questions and 512 KB each (`crops.ts` `chunks`), and says what it did
+  ("67 questions, 17 continuations joined: saved."), with **Undo** until the
+  next action: one save that takes away exactly what it added (`undoAdded`),
+  so its suggestions are offered again. A suggestion becomes a rectangle at
+  its box to 0.01 pt (`acceptOffers`), as a drawn box is (`toPdfBox`): the
+  finder's corners are unrounded (49.039999999999964 for 49.04), and Undo
+  finds a box it added to a question saved before it by those corners as
+  `save_crops` reads them back. What it did, and its saving, is read out
+  (a `role="status"` line); Accept all is `aria-disabled` rather than
+  disabled, so the keyboard's focus stays on it through the save, and Undo
+  hands it back to Accept all.
+- **Next to check (n)** is what Accept all leaves: each "?" and each
+  continuation it could not join, in bank order. It scrolls to the next one
+  from the page in view, outlines it, and opens a panel with its reasons:
+  Accept (or Add as box N, or Accept as a question) and Skip; Enter and S
+  while the panel itself has focus (Enter on its Skip or × does what that
+  button says), Esc to close. The next one is worked out after
+  each answer, since an accepted box can cover another "?" under it. The
+  panel saves once, when it ends or is closed.
+- **Sections** (`lib/worksheet/sections.ts`, `components/questions/SectionsRail.tsx`):
+  a rail beside the pages from 1,100 px, and a drawer from the Sections
+  button below that, a modal dialog: focus goes to its first control and
+  back to Sections when it closes (×, Esc, the backdrop, or a window
+  widened past 1,100 px), and the screen behind it is inert meanwhile;
+  hidden while the course has no topics. A section starts
+  at the first suggested question under a heading the finder reads
+  (`Suggestion.section`) that differs from the section before, so a heading
+  repeated at the next page's top is not a new one; questions on screen
+  belong by the suggestion their own box covers, or by their place. Each
+  section has one picker: Same as above, No topic, the course's topics.
+  Choosing one tags every question in the section, saved ones too, and those
+  of each section under it showing Same as above, in one save, with Undo; a
+  section chosen keeps its topic when the one above changes. Chosen before
+  Accept all, a section's topic goes to the questions it makes, and a box
+  drawn in it takes it too. **New section here**, on a selected question,
+  starts a section where the finder reads no heading (IM3's LOGARITHMS,
+  printed above Q31 but not read); it is never saved, and its × takes it
+  away.
+- **Saving.** Hand-drawn boxes and edits save as they did, when the
+  in-charge leaves the area: once every page with a change is out of view
+  and no box is being drawn, moved or resized (`Stage`'s `onGesture`; a
+  save holds edits while it runs, so one that started mid-drag dropped the
+  box let go during it), when switching to One page, on leaving the screen,
+  and with Accept all, a section's topic or Undo. A save in parts that is
+  refused part-way keeps the parts before it saved and the rest to send
+  again as they are (Try again), editing held until then.
+- **A drag at the edge** scrolls only as far as its own page's edge, in
+  All pages and One page alike: the box stops at the page's edge anyway,
+  and in All pages the scroll used to run on through the pages after it
+  until the page the drag began on was let go mid-gesture.
+
+Measured in the study's browser harness (1440 × 900 at 2x, 30 Mbit/s with
+40 ms, its counting rules and its model of a person's own time), from the
+course page as the study's flow 1, before (One page, as step 1 left it, the
+table above) and after (All pages, on this build): topics chosen in the rail
+top down, then Accept all. A look at every page, scrolled a window at a
+time, is counted apart. "Equal" is the study's own check: each question's
+box 1 page, reading order, top and topic against its saved bank.
+
+| Bank | One page: clicks · scrolls · drags | All pages: clicks · scrolls · drags | Estimate | Measured work | Saves | Saved bank |
+|---|---|---|---|---|---|---|
+| IM3 U4 booklet A, 37 pp., 67 questions | 121 · 36 · 0 | 21 · 0 · 0 (5 sections, Accept all, New section here at p. 17) | 302 → 33 s | 5.7 s | 2 calls | equal: 67 questions, 84 boxes, 4 topics |
+| IM2 U4 worksheet 1, 32 pp., 93 questions | 80 · 31 · 0 | 15 · 0 · 0 (5 sections, Accept all) | 211 → 25 s | 6.2 s | 1 call | equal: 93 questions, 4 topics |
+| hl-book-b, 87 pp., 31 MB | 64 · 14 · 3 (pp. 1–16, 69 questions) | 30 · 6 · 3 (the whole book, three boxes by hand) | 139 → 55 s | 35.6 s, of it 27.4 s waiting (26.2 s opening) | 4 calls | pp. 1–16 equal to 0.01 pt; 407 questions, 437 boxes |
+
+Before step 1 the same three were 337, 241 and 160 s. One page itself, on
+this build, measured as step 1 left it: IM3 in 122 clicks (step 1's 121 and
+the switch), 36 scrolls and 303 s, the same saved bank. hl-book-b's "equal
+to 0.01 pt": four of its 69 tops fall on a 0.05 boundary of the study's
+record to 0.1 pt (760.95, saved now as the box is accepted, where the
+unrounded 760.9499… was saved a hair below). The look: IM3 77 scrolls in
+32.6 s, IM2 73 in 30.5 s, hl-book-b's pp. 1–16 36 in 15.7 s, each at most 3
+canvases and no frame over 50 ms. By the time model a look at all 37 of
+IM3's pages at this width is about 170 s on top of the 33 (2.5 s a page):
+the look, not the clicking, is what a booklet takes now. Also checked: on
+BG 04 Trigonometry (15 pp., 153 questions, 16 with a real "?"), Accept all
+137 in one call, its Undo in one call to 0, and the 16 checked by keys in
+13 answers (three were covered by boxes accepted over them), the next shown
+in 19–57 ms and one save at the end; a box drawn on p. 1 was not saved
+while p. 1 was in view, was saved in one call once it was not, and was
+there after a reload; at 900 px the rail is a drawer and nothing scrolls
+sideways. hl-book-b scrolled from p. 1 to p. 87, 394 questions saved, held
+at most 3 canvases (2 at the end); every Chromium process together stayed
+level at 0.9–1.15 GB, against 0.7–0.76 GB for One page through the same
+pages, and did not grow with the pages passed; the page's JavaScript heap
+was 14 MB. Flung at a window every 120 ms the median frame was 16.7 ms, and
+16–24 of about 1,600 frames took over 50 ms, the worst 67 ms (the build
+before this review's fixes, with overlays on drawn pages only, on the same
+bank: 12–18, the worst 100–117 ms), each pdf.js drawing a page's images on
+the main thread; each page was drawn once as it passed, none thrown away.
+
+The review of this view found seven faults, each reproduced in the browser
+or against `save_crops` and fixed as above. After the fixes:
+
+- **Undo after Accept all** on IM3 with question 46 (p. 24) saved first:
+  Accept all 66 questions and 17 continuations in one call, Undo in one
+  call, every row as it was (it used to leave the continuation on p. 25 on
+  question 46, and that suggestion was no longer offered). The same in
+  `review.mjs` (§9.1), with a stem above a question saved before it.
+- **A box drawn while the auto-save would start**: IM3, a box on p. 2 not
+  saved, then a draw on p. 3 held at the window's foot until p. 2 was out
+  of view, the save's reply held 1.2 s: no save during the drag (it used to
+  start 0.12 s in and drop the box let go meanwhile), the box kept, and
+  both saved in one call once the area was left, there after a reload.
+- **A drag held at the edge** for 2.5 s on IM3 p. 3: the scroll stopped at
+  p. 3's foot (2,843 to 3,465 px, where it used to run on to 5,074), p. 3
+  kept its canvas and overlay, the box was kept, and no error (it used to
+  throw a TypeError once p. 3 was let go). One page's draw held at the top
+  still scrolled 375 px and ended at the pointer.
+- **Next to check by keyboard**: Enter on Skip skipped and on × closed;
+  the bank stayed at 137 questions (both used to accept: 139).
+- **The sections drawer** at 900 px: focus to its × on open, Tab stayed in
+  it, Esc and × closed it with focus back on Sections, the screen behind it
+  inert, and a window widened to 1,300 px closed it with nothing left
+  inert.
+- **What Accept all, Undo and a topic did** was in the status line ("137
+  questions: saved.", "INDICES: 52 questions tagged Indices." chosen in the
+  drawer, "Undone: …"), and focus was on Accept all after Accept all and
+  after Undo (it used to fall to the page's body).
+- **Tab through All pages**: 40 presses from p. 2's first suggestion went
+  on through pp. 2–19 (they used to stop at p. 4 and go back to the
+  header).
+
 ### 4.4 Make worksheet
 
 **Picks** are question ids in `sessionStorage` under one key per course, read
@@ -1660,6 +1814,21 @@ for if AI is built later.
   (§9.1).
 - No migration: what a suggestion becomes is saved by the same `save_crops`
   call as any other box.
+
+**As built (continuous crop).**
+
+- New: `components/questions/{BookView,SectionsRail,CheckPanel}.tsx`;
+  `lib/worksheet/{review,sections}.ts`; `supabase/tests/review.mjs`, which
+  `run.sh` runs (§9.1).
+- Changed: `components/questions/PageView.tsx` (the All pages view and the
+  switch, with One page as it was); `components/questions/Stage.tsx`
+  (`onGesture`, and a drag's edge scroll bounded by its own page);
+  `lib/worksheet/crops.ts` (`chunks`, and `acceptOffers` giving what it took
+  and a topic per suggestion, each rectangle to 0.01 pt);
+  `lib/worksheet/propose.ts` (`CONTINUES` exported); `app/globals.css`
+  (`.btn[aria-disabled="true"]` looks disabled); `supabase/tests/run.sh`.
+- No migration, and no server change: Accept all, Undo and a section's topic
+  are `save_crops` calls like any other, as many as fit 500 questions each.
 
 ## 5. Suggestions
 
@@ -2922,6 +3091,31 @@ two alike, a stem ignoring its column, no `stimuliOver`, no four-box check on
 a continuation, a full question not reported, an uncropped continuation taken
 as a question, `questionAt` ignoring the page) it failed on every one.
 
+**As built (continuous crop).** `run.sh` then runs `supabase/tests/review.mjs`,
+six checks against the same `save_crops`: Accept all on a booklet with a
+stem, continuations, two "?" and a continuation left behind, in one call with
+a box drawn meanwhile, and its Undo in one call back to that box alone, with
+every suggestion offered again; a continuation left to check and joined by
+the next Accept all, and one onto a full question left; sections from the
+headings (a repeated one is not new), questions placed by the suggestion
+they cover or their place, a topic tagging a section and those under it at
+Same as above in one call of `{id}` boxes, a section chosen keeping its
+topic, and a re-tag undone in one call; topics chosen before accepting,
+No topic among them, and a section started by hand; and 1,200 questions in
+3 calls of at most 500 questions and 512 KB (566–682 ms each in
+`save_crops`), each valid alone, their Undo in parts of 50, an edit never
+apart from its own removals at any size, and a part sent twice refused
+(23505); and, with corners as the finder gives them (49.039999999999964
+for 49.04), two questions accepted and saved one at a time, then Accept all
+putting a stem above one and joining a continuation to the other, and its
+Undo leaving every row as it was, ids and reading order included. Against
+nine breakages (a continuation's own "?" counted, No topic read as no
+choice, a repeated heading made a new section, a topic run on past a
+section chosen, an edit split from its removals, Undo leaving its stimulus,
+a "?" accepted, a section's topic ignored, a suggestion's box accepted
+unrounded) it failed on every one: the last at the first save, where the
+bank read back is not what the screen showed.
+
 **As built (PR 3).** `run.sh` then runs `supabase/tests/worksheet.mjs`, which
 needs no database: the layout of `lib/worksheet/layout.ts`, boxes in and
 positions out on the templates' page, and the source line in pdf-lib's own
@@ -3548,6 +3742,15 @@ Not built, each for the reason given:
     key in both chap1 and chap2; Grill 5's key leaves FRQ 2 empty; and in
     economics, obap-unit04 Q31's options D–E come from another question and
     qb-6250's FRQ 7 mark scheme scores parts the question does not have.
+11. **A teacher on a bank's page is offered Make worksheet, which is then
+    refused.** Since worksheets are for admins and in-charges again
+    (a03c954), the Questions page gives the picks bar `canMake={manager}`,
+    but the page view's picks bar (`components/questions/PageView.tsx`) does
+    not, so a teacher there sees Make worksheet and the modal answers "Only
+    in-charges and admins can make worksheets."
+12. **The finder misses IM3's LOGARITHMS heading** (p. 17, underlined bold
+    above Q31), so its questions fall in HALF-LIFE's section until New
+    section here splits it (§4.3, All pages).
 
 ---
 

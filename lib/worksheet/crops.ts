@@ -74,6 +74,17 @@ export function keyOf(page: number, b: PdfBox): string {
 const sameBox = (a: PdfBox, b: PdfBox) =>
   a.x0 === b.x0 && a.y0 === b.y0 && a.x1 === b.x1 && a.y1 === b.y1;
 
+/**
+ * A box to 0.01 pt, as source.ts toPdfBox makes a drawn one: what save_crops
+ * stores (a real) and reads back. The finder's corners are unrounded, so a
+ * suggestion's 49.039999999999964 is saved as 49.04, and a rectangle kept at
+ * the first would never be found again by its corners (keyOf).
+ */
+const rounded = (b: PdfBox): PdfBox => {
+  const r = (v: number) => Math.round(v * 100) / 100;
+  return { x0: r(b.x0), y0: r(b.y0), x1: r(b.x1), y1: r(b.y1) };
+};
+
 /** The screen's state for a bank as saved: one rectangle per distinct page and corners. */
 export function fromBank(bank: BankQuestion[]): Crops {
   const rects: Record<string, CropRect> = {};
@@ -438,6 +449,8 @@ export function stimuliOver(c: Crops, found: FoundPages, q: Offer): string[] {
 export interface Accepting {
   /** The topic for new questions. */
   topic: string | null;
+  /** A new question's topic by the suggestion it is made from, in place of `topic`: its section's (sections.ts). */
+  topicOf?: (s: Offer) => string | null;
   /** The stimulus in hand: a question no accepted stem names goes under it, as a drawn one does. */
   stim: string | null;
   /** A new id: a question's (a uuid, as save_crops takes it) or a rectangle's. */
@@ -455,21 +468,24 @@ export interface Accepting {
  * Stems and contexts are taken first, so the questions accepted with them go
  * under them. Four boxes stay the limit: a question with no room is left as it
  * is and returned in `full`, and a continuation whose question is not on screen
- * is not taken, and returned in `left`.
+ * is not taken, and returned in `left`. `taken` is every suggestion that became
+ * a box, in the order taken, with its rectangle at the same place in `rects`.
+ * Each rectangle is its suggestion's box to 0.01 pt, as it is saved.
  */
 export function acceptOffers(
   c: Crops,
   found: FoundPages,
   offers: readonly Offer[],
   how: Accepting,
-): { crops: Crops; rects: string[]; full: string[]; left: Offer[] } {
+): { crops: Crops; rects: string[]; taken: Offer[]; full: string[]; left: Offer[] } {
   let next = c;
   const rects: string[] = [];
+  const taken: Offer[] = [];
   const full: string[] = [];
   const left: Offer[] = [];
   const rank = (s: Offer) => (s.type === "stem" || s.type === "context" ? 0 : 1);
   for (const s of [...offers].sort((a, b) => rank(a) - rank(b))) {
-    const rect = { id: how.newId("rect"), page: s.page, box: s.box };
+    const rect = { id: how.newId("rect"), page: s.page, box: rounded(s.box) };
     if (s.type === "stem" || s.type === "context") {
       const ids = namedOnScreen(next, found, s).flatMap((x) => (x.id ? [x.id] : []));
       next = {
@@ -497,14 +513,15 @@ export function acceptOffers(
       const over = stimuliOver(next, found, s);
       next = addQuestion(
         next,
-        { id: how.newId("question"), topic_id: how.topic },
+        { id: how.newId("question"), topic_id: how.topicOf ? how.topicOf(s) : how.topic },
         rect,
         over.length ? over : how.stim,
       );
     }
     rects.push(rect.id);
+    taken.push(s);
   }
-  return { crops: next, rects, full, left };
+  return { crops: next, rects, taken, full, left };
 }
 
 // --- reading order (§5.1, Reading order) -----------------------------------------
@@ -847,6 +864,66 @@ export function diff(
 }
 
 export const isEmpty = (s: SaveChanges) => !s.add.length && !s.edit.length && !s.remove.length;
+
+/** How much one save_crops call carries at most: questions it touches, and bytes of JSON. */
+export interface ChunkLimits {
+  questions: number;
+  bytes: number;
+}
+
+// 500 new questions take about 0.6 s of save_crops on local Postgres
+// (supabase/tests/review.mjs); 512 KB stays well inside the 1 MB a Server
+// Action's body may be by default (Next's serverActions.bodySizeLimit).
+export const CHUNK: ChunkLimits = { questions: 500, bytes: 512 * 1024 };
+
+/**
+ * One save split into calls of at most `limits` each, for a change too big for
+ * one (Accept all on a long bank, or its Undo). The split is only ever between
+ * whole questions: an add with its boxes, and an edit with the removals of its
+ * own boxes, since save_crops refuses an edit that neither lists nor removes
+ * every box of its question. A question whose boxes are only removed travels
+ * as its removals. The parts touch different questions, so each is a valid call
+ * on its own against the bank as read, in any order, and together they are the
+ * one call `changes` was. They are sent as they are, never diffed again: a page
+ * saved by an earlier part no longer looks changed, and the reading order its
+ * other boxes were given would be lost. Nothing to save is no part at all.
+ */
+export function chunks(bank: BankQuestion[], changes: SaveChanges, limits: ChunkLimits = CHUNK): SaveChanges[] {
+  const owner = new Map<string, string>();
+  for (const q of bank) for (const b of q.boxes) owner.set(b.id, q.id);
+  const removed = new Map<string, string[]>();
+  for (const id of changes.remove) {
+    const q = owner.get(id) ?? id;
+    const list = removed.get(q);
+    if (list) list.push(id);
+    else removed.set(q, [id]);
+  }
+  const units: SaveChanges[] = [];
+  const edited = new Set(changes.edit.map((e) => e.id));
+  for (const [q, ids] of removed) if (!edited.has(q)) units.push({ add: [], edit: [], remove: ids });
+  for (const e of changes.edit) units.push({ add: [], edit: [e], remove: removed.get(e.id) ?? [] });
+  for (const a of changes.add) units.push({ add: [a], edit: [], remove: [] });
+
+  const parts: SaveChanges[] = [];
+  let part: SaveChanges | null = null;
+  let questions = 0;
+  let bytes = 0;
+  for (const u of units) {
+    const size = JSON.stringify(u).length;
+    if (!part || questions + 1 > limits.questions || bytes + size > limits.bytes) {
+      part = { add: [], edit: [], remove: [] };
+      parts.push(part);
+      questions = 0;
+      bytes = 0;
+    }
+    part.add.push(...u.add);
+    part.edit.push(...u.edit);
+    part.remove.push(...u.remove);
+    questions += 1;
+    bytes += size;
+  }
+  return parts;
+}
 
 /**
  * What is not saved yet, as the screen reports it: how many questions are new,

@@ -55,9 +55,12 @@ export function QuestionsView({
   const [making, setMaking] = useState(false);
   const topicName = topics.find((t) => t.id === topicId)?.name ?? null;
 
+  // Always with ?page=, so an in-charge opens One page here, as a teacher does:
+  // without it cropping opens All pages, which has no topic filter. With a
+  // topic, a first page that has none of it gives way to the topic's first.
   const open = (r: BankRow) =>
     topicId
-      ? `/courses/${courseId}/questions/${r.fileId}?topic=${topicId}`
+      ? `/courses/${courseId}/questions/${r.fileId}?page=${r.firstPage}&topic=${topicId}`
       : `/courses/${courseId}/questions/${r.fileId}?page=${r.firstPage}`;
 
   return (
